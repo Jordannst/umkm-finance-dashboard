@@ -62,7 +62,7 @@ Lihat planning lengkap di:
    select count(*) from public.categories;  -- harus 13
    ```
 
-   > **Penting**: pastikan UUID `NEXT_PUBLIC_DEMO_BUSINESS_ID` di `.env.local` sama dengan UUID di `supabase/seed.sql` (default: `00000000-0000-0000-0000-000000000001`). Kalau sudah pernah seed dengan UUID lain, sesuaikan salah satunya.
+   > **Penting**: pastikan UUID `NEXT_PUBLIC_DEMO_BUSINESS_ID` di `.env.local` sama dengan UUID di `supabase/seed.sql` (default: `11111111-1111-4111-8111-111111111111`). Kalau sudah pernah seed dengan UUID lain, sesuaikan salah satunya.
 
 4. **Atur Supabase Auth:**
 
@@ -213,7 +213,7 @@ curl -X POST https://YOUR-APP.example.com/api/liana/finance-input \
   -H "Authorization: Bearer $LIANA_SHARED_SECRET" \
   -H "Content-Type: application/json" \
   -d '{
-    "business_id": "00000000-0000-0000-0000-000000000001",
+    "business_id": "11111111-1111-4111-8111-111111111111",
     "type": "income",
     "amount": 120000,
     "category_name": "penjualan",
@@ -238,7 +238,7 @@ curl -X POST https://YOUR-APP.example.com/api/liana/receivable-input \
   -H "Authorization: Bearer $LIANA_SHARED_SECRET" \
   -H "Content-Type: application/json" \
   -d '{
-    "business_id": "00000000-0000-0000-0000-000000000001",
+    "business_id": "11111111-1111-4111-8111-111111111111",
     "customer_name": "Budi Santoso",
     "amount": 200000,
     "category_name": "piutang_pelanggan",
@@ -256,7 +256,7 @@ curl -X POST https://YOUR-APP.example.com/api/liana/receivable-payment \
   -H "Authorization: Bearer $LIANA_SHARED_SECRET" \
   -H "Content-Type: application/json" \
   -d '{
-    "business_id": "00000000-0000-0000-0000-000000000001",
+    "business_id": "11111111-1111-4111-8111-111111111111",
     "customer_name": "Budi",
     "amount": 100000,
     "payment_date": "2026-04-27",
@@ -271,7 +271,7 @@ Error code yang bisa muncul: `receivable_not_found` (404), `receivable_already_p
 Ringkasan untuk Liana balas pertanyaan user "rekap hari ini" / "minggu ini".
 
 ```bash
-curl "https://YOUR-APP.example.com/api/liana/recap?business_id=00000000-0000-0000-0000-000000000001&period=today" \
+curl "https://YOUR-APP.example.com/api/liana/recap?business_id=11111111-1111-4111-8111-111111111111&period=today" \
   -H "Authorization: Bearer $LIANA_SHARED_SECRET"
 ```
 
@@ -327,7 +327,7 @@ openclaw mcp add umkm-finance \
   --args "$PWD/server.mjs" \
   --env DASHBOARD_URL=https://your-app.vercel.app \
   --env LIANA_SHARED_SECRET=your-secret-min-32-char \
-  --env BUSINESS_ID=00000000-0000-0000-0000-000000000001
+  --env BUSINESS_ID=11111111-1111-4111-8111-111111111111
 ```
 
 Setelah register, owner bisa langsung chat ke Liana dengan natural language:

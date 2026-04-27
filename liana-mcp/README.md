@@ -46,7 +46,7 @@ openclaw mcp add umkm-finance \
   --args "$ABS_PATH" \
   --env DASHBOARD_URL=https://your-app.vercel.app \
   --env LIANA_SHARED_SECRET=your-secret-min-32-char \
-  --env BUSINESS_ID=00000000-0000-0000-0000-000000000001
+  --env BUSINESS_ID=11111111-1111-4111-8111-111111111111
 ```
 
 > **Penting**: gunakan **path absolute** ke `server.mjs`. Path relatif akan gagal saat OpenClaw spawn process dari working directory yang berbeda.

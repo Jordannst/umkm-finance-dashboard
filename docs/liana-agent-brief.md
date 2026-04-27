@@ -45,7 +45,7 @@ Content   : application/json
 Untuk MVP single-tenant, Liana selalu pakai 1 `business_id` yang sama. Simpan sebagai env/config:
 
 ```
-BUSINESS_ID = "00000000-0000-0000-0000-000000000001"
+BUSINESS_ID = "11111111-1111-4111-8111-111111111111"
 ```
 
 (Kalau multi-tenant nanti, `business_id` per-user/per-room dapat di-resolve via mapping.)

@@ -9,10 +9,10 @@
 
 -- Demo business. UUID-nya HARUS match dengan NEXT_PUBLIC_DEMO_BUSINESS_ID
 -- di file .env.local. Default di .env.example:
---   00000000-0000-0000-0000-000000000001
+--   11111111-1111-4111-8111-111111111111
 insert into public.businesses (id, name, owner_name)
 values (
-  '00000000-0000-0000-0000-000000000001',
+  '11111111-1111-4111-8111-111111111111',
   'UMKM Demo Kopi Susu',
   'Owner Demo'
 )
@@ -23,7 +23,7 @@ set name = excluded.name,
 -- Default categories
 do $$
 declare
-  v_business_id uuid := '00000000-0000-0000-0000-000000000001';
+  v_business_id uuid := '11111111-1111-4111-8111-111111111111';
   v_pairs text[] := array[
     -- income
     'income:penjualan:Penjualan',

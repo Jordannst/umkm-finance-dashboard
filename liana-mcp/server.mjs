@@ -16,7 +16,7 @@
  *     --args "/abs/path/to/liana-mcp/server.mjs" \
  *     --env DASHBOARD_URL=https://your-app.vercel.app \
  *     --env LIANA_SHARED_SECRET=your-secret \
- *     --env BUSINESS_ID=00000000-0000-0000-0000-000000000001
+ *     --env BUSINESS_ID=11111111-1111-4111-8111-111111111111
  *
  * Lihat README.md di folder ini untuk panduan lengkap.
  */
@@ -57,17 +57,6 @@ if (!BUSINESS_ID) {
 function formatRupiah(n) {
   if (typeof n !== "number" || Number.isNaN(n)) return "Rp0";
   return "Rp" + n.toLocaleString("id-ID");
-}
-
-function todayJakarta() {
-  // Format YYYY-MM-DD di TZ Jakarta
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Jakarta",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  return fmt.format(new Date());
 }
 
 async function callApi(method, path, body) {
