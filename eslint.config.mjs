@@ -12,7 +12,23 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Salinan docs Next.js 16 untuk referensi offline:
+    "docs/_nextjs-ref/**",
   ]),
+  {
+    rules: {
+      // Izinkan parameter / variabel yang sengaja diawali "_"
+      // (mis. `_prev` di useActionState).
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+        },
+      ],
+    },
+  },
 ]);
 
 export default eslintConfig;
