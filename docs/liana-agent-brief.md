@@ -2,6 +2,10 @@
 
 Dokumen ini adalah panduan resmi untuk Liana (asisten chat) cara berinteraksi dengan Dashboard Keuangan UMKM. Boleh dipakai sebagai **system prompt**, **knowledge base**, atau **tool description** sesuai stack agent yang dipakai.
 
+> **🦞 Liana = OpenClaw**: integrasi resmi pakai **MCP server** di folder [`../liana-mcp/`](../liana-mcp/). MCP server sudah implement 5 tools yang otomatisasi semua flow di bawah — dokumen ini berfungsi sebagai **system prompt pendamping** untuk kasih konteks tone/parsing rules, bukan instruksi cara call API mentah.
+>
+> Kalau pakai stack agent lain (OpenAI function calling, Anthropic tool use, dll), dokumen ini bisa dipakai untuk reverse-engineer skema tool secara manual.
+
 ---
 
 ## 1. Konteks & Identitas Liana

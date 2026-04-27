@@ -301,6 +301,41 @@ Response:
 - Endpoint pakai `SUPABASE_SERVICE_ROLE_KEY` (bypass RLS), tapi setiap query/insert eksplisit filter `business_id` dari body — defense in depth.
 - Verifikasi auth pakai `crypto.timingSafeEqual` agar aman dari timing attack.
 
+## Integrasi OpenClaw (Liana)
+
+Liana yang dipakai owner adalah [**OpenClaw**](https://openclaw.ai) — personal AI assistant open-source yang extend lewat **Model Context Protocol (MCP)**.
+
+Project ini menyediakan **MCP server siap pakai** di folder [`liana-mcp/`](./liana-mcp/) yang wrap REST API `/api/liana/*` jadi 5 tool yang Liana bisa pakai langsung dari WhatsApp/Telegram/Slack/dll:
+
+| Tool | Fungsi |
+|---|---|
+| `umkm_catat_pemasukan_pengeluaran` | Catat income / expense |
+| `umkm_catat_piutang_baru` | Catat piutang pelanggan |
+| `umkm_catat_pembayaran_piutang` | Catat pembayaran (atomik) |
+| `umkm_ambil_rekap` | Ringkasan today / week / month |
+| `umkm_health_check` | Test koneksi |
+
+Setup ringkas (3 langkah):
+
+```bash
+cd liana-mcp
+npm install
+
+# Register ke OpenClaw (path absolute ke server.mjs)
+openclaw mcp add umkm-finance \
+  --path node \
+  --args "$PWD/server.mjs" \
+  --env DASHBOARD_URL=https://your-app.vercel.app \
+  --env LIANA_SHARED_SECRET=your-secret-min-32-char \
+  --env BUSINESS_ID=00000000-0000-0000-0000-000000000001
+```
+
+Setelah register, owner bisa langsung chat ke Liana dengan natural language:
+
+> *"jual kopi susu 4 cup, dapet 60rb"* → Liana otomatis call tool → tercatat di dashboard.
+
+Detail lengkap setup, troubleshooting, dan test ada di [`liana-mcp/README.md`](./liana-mcp/README.md). Briefing tone, parsing rules, dan conversation flow examples ada di [`docs/liana-agent-brief.md`](./docs/liana-agent-brief.md) — bisa dipakai sebagai system prompt tambahan kalau Liana butuh konteks bahasa Indonesia.
+
 ## Deploy ke Vercel
 
 Project sudah siap deploy ke Vercel dengan minimal config. Build sudah pass clean lint+typescript.
