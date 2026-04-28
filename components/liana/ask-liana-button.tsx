@@ -8,6 +8,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+import { useLianaUIOptional } from "./liana-ui-context";
+
 export type AskLianaMode = "send" | "telegram" | "copy" | "auto";
 
 export interface AskLianaButtonProps {
@@ -43,6 +45,7 @@ interface AskApiSuccess {
   ok: true;
   data: { runId: string };
 }
+
 interface AskApiError {
   ok: false;
   error: { code: string; message: string };
@@ -72,6 +75,7 @@ export function AskLianaButton({
   withIcon = true,
 }: AskLianaButtonProps) {
   const router = useRouter();
+  const lianaUI = useLianaUIOptional();
   const [done, setDone] = React.useState(false);
   const [pending, setPending] = React.useState(false);
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -168,6 +172,13 @@ export function AskLianaButton({
   async function handleSend() {
     if (pending) return;
     setPending(true);
+
+    // Push pill instan supaya user dapet feedback visual sebelum API
+    // selesai. Pill awalnya "sending" (loading state), lalu transition
+    // ke "thinking" begitu runId di-set, lalu "done" via Realtime.
+    // Kalau di route tanpa provider (unlikely tapi safe), pillId = null.
+    const pillId = lianaUI?.addPill(prompt) ?? null;
+
     try {
       const res = await fetch("/api/liana/ask", {
         method: "POST",
@@ -183,9 +194,16 @@ export function AskLianaButton({
       }
 
       if (res.ok && body?.ok) {
-        toast.success("Liana sedang menjawab di Telegram", {
-          description: "Buka Telegram untuk lihat balasan Liana.",
-        });
+        // Sukses — link runId ke pill supaya pill nge-track lifecycle
+        // run lewat Realtime (pending → done).
+        if (pillId && lianaUI) {
+          lianaUI.setPillRunId(pillId, body.data.runId);
+        } else {
+          // Fallback toast kalau pill stack gak available.
+          toast.success("Liana sedang menjawab di Telegram", {
+            description: "Buka Telegram untuk lihat balasan Liana.",
+          });
+        }
         flashDone();
         return;
       }
@@ -195,6 +213,12 @@ export function AskLianaButton({
       const message =
         (body && !body.ok ? body.error?.message : undefined) ??
         "Gagal menghubungi Liana.";
+
+      // Set pill error supaya feedback visual muncul juga di pill stack.
+      // Toast tetap dikirim untuk error yang butuh action button (Settings).
+      if (pillId && lianaUI) {
+        lianaUI.setPillError(pillId, friendlyErrorFor(code, res.status, message));
+      }
 
       if (res.status === 401) {
         toast.error("Sesi tidak valid", {
@@ -237,12 +261,35 @@ export function AskLianaButton({
       toast.error("Gagal mengirim ke Liana", { description: message });
     } catch (err) {
       console.error("[AskLianaButton] network error:", err);
+      if (pillId && lianaUI) {
+        lianaUI.setPillError(pillId, "Cek koneksi internet, lalu coba lagi.");
+      }
       toast.error("Gagal menghubungi Liana", {
         description: "Cek koneksi internet, lalu coba lagi.",
       });
     } finally {
       setPending(false);
     }
+  }
+
+  /**
+   * Pesan error pendek untuk pill (max ~50 char). Toast dapat copy lebih
+   * panjang + action button.
+   */
+  function friendlyErrorFor(
+    code: string | undefined,
+    status: number,
+    fallback: string,
+  ): string {
+    if (status === 401) return "Sesi tidak valid";
+    if (code === "telegram_not_linked" || status === 412) {
+      return "Telegram belum dihubungkan";
+    }
+    if (status === 429) return "Liana sedang sibuk, coba lagi";
+    if (code === "not_configured" || status === 503) {
+      return "Integrasi belum aktif";
+    }
+    return fallback.length > 60 ? fallback.slice(0, 57) + "..." : fallback;
   }
 
   const onClick =

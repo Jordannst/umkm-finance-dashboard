@@ -41,4 +41,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# Brainstorm companion sessions (local only, not for git)
+.superpowers/
+
 

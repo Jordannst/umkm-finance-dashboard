@@ -12,11 +12,12 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { useLianaRuns, type LianaRun } from "@/hooks/use-liana-runs";
+import type { LianaRun } from "@/hooks/use-liana-runs";
 import { cn } from "@/lib/utils";
 
+import { useLianaUI } from "./liana-ui-context";
+
 interface LianaChatPanelProps {
-  userId: string;
   /** Username bot Telegram untuk tombol "Buka di Telegram". Optional. */
   botUsername?: string;
 }
@@ -28,29 +29,50 @@ interface LianaChatPanelProps {
  *  - Collapsed: floating bubble bottom-right (FAB) dengan badge pending
  *  - Expanded: side drawer dari kanan, list runs, expandable per run
  *
- * Real-time:
- *  - Pending run muncul instan saat user klik tombol Tanya Liana (INSERT
- *    via /api/liana/ask).
- *  - Status berubah jadi 'done' + reply_text terisi saat callback masuk
- *    (UPDATE via /api/liana/run-callback). Subscribe Supabase Realtime.
+ * Sumber state: `useLianaUI()` context — `runs`, `chatPanelOpen`,
+ * `selectedRunId`. Pill stack juga consume context yang sama, jadi
+ * klik "Lihat" di pill → set selectedRunId + open panel → panel
+ * scroll-into-view + flash highlight ke row yang sesuai.
  */
-export function LianaChatPanel({ userId, botUsername }: LianaChatPanelProps) {
-  const [open, setOpen] = React.useState(false);
-  const { runs, pendingCount, loading } = useLianaRuns({ userId });
+export function LianaChatPanel({ botUsername }: LianaChatPanelProps) {
+  const {
+    runs,
+    pendingCount,
+    loading,
+    chatPanelOpen: open,
+    setChatPanelOpen: setOpen,
+    selectedRunId,
+    setSelectedRunId,
+  } = useLianaUI();
+  const listRef = React.useRef<HTMLUListElement | null>(null);
 
-  // Auto-open saat ada pending run baru (UX cue: user klik tombol → panel
-  // otomatis terbuka supaya gak terlewat). Cek lewat ref biar gak loop.
-  const lastPendingCountRef = React.useRef(0);
+  // Saat selectedRunId di-set (lewat klik "Lihat" pada pill), scroll ke
+  // <li data-run-id> yang sesuai dan flash highlight 1x via class CSS.
+  // Cleanup: setelah animasi flash selesai, clear selectedRunId supaya
+  // klik tombol yang sama lagi tetap re-trigger.
   React.useEffect(() => {
-    if (
-      pendingCount > lastPendingCountRef.current &&
-      pendingCount > 0 &&
-      !open
-    ) {
-      setOpen(true);
-    }
-    lastPendingCountRef.current = pendingCount;
-  }, [pendingCount, open]);
+    if (!selectedRunId || !open) return;
+    // Tunggu 1 frame supaya panel sudah render setelah open=true.
+    const raf = requestAnimationFrame(() => {
+      const root = listRef.current;
+      if (!root) return;
+      const target = root.querySelector<HTMLLIElement>(
+        `[data-run-id="${selectedRunId}"]`,
+      );
+      if (!target) return;
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+      target.classList.add("liana-anim-row-flash");
+      // Hapus class setelah animasi selesai (1.5s) supaya bisa di-trigger lagi.
+      const timeout = setTimeout(() => {
+        target.classList.remove("liana-anim-row-flash");
+        setSelectedRunId(null);
+      }, 1600);
+      // Simpan timeout di-ref dengan cleanup di outer effect bisa risky,
+      // jadi kita ikat di closure: cleanup outer akan tetap clear.
+      return () => clearTimeout(timeout);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [selectedRunId, open, setSelectedRunId]);
 
   return (
     <>
@@ -66,7 +88,7 @@ export function LianaChatPanel({ userId, botUsername }: LianaChatPanelProps) {
       {/* Floating bubble (FAB) — selalu render */}
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(!open)}
         className={cn(
           "fixed bottom-4 right-4 z-50 flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-all",
           "bg-primary text-primary-foreground hover:scale-105 hover:shadow-xl",
@@ -127,7 +149,7 @@ export function LianaChatPanel({ userId, botUsername }: LianaChatPanelProps) {
             ) : runs.length === 0 ? (
               <EmptyState />
             ) : (
-              <ul className="space-y-3">
+              <ul ref={listRef} className="space-y-3">
                 {runs.map((run) => (
                   <RunItem
                     key={run.id}
@@ -179,7 +201,10 @@ function RunItem({
   const telegramUrl = botUsername ? `https://t.me/${botUsername}` : null;
 
   return (
-    <li className="rounded-lg border border-border bg-card">
+    <li
+      data-run-id={run.id}
+      className="rounded-lg border border-border bg-card"
+    >
       {/* Header: status + timestamp */}
       <div className="flex items-center justify-between gap-2 border-b border-border/50 px-3 py-2 text-xs">
         <div className="flex items-center gap-1.5">
