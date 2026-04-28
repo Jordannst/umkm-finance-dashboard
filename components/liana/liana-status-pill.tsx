@@ -1,15 +1,9 @@
 "use client";
 
 import * as React from "react";
-import {
-  AlertCircle,
-  ArrowRight,
-  Bot,
-  MessageCircle,
-  Sparkles,
-  X,
-} from "lucide-react";
+import { AlertCircle, ArrowRight, Bot, Sparkles, X } from "lucide-react";
 
+import { elapsedToPhase } from "@/lib/finance/liana/format";
 import { cn } from "@/lib/utils";
 
 import type { PillView } from "./liana-ui-context";
@@ -46,11 +40,33 @@ export function LianaStatusPill({
   const isDone = pill.status === "done";
   const isError = pill.status === "error";
 
-  // Status text & avatar icon per state.
+  // Cycling tick — hanya jalan saat status='thinking' biar labels +
+  // avatar icon transition over time. 500ms cukup buat re-evaluate phase
+  // tanpa overcost render. Cleanup + restart natural saat status berubah.
+  //
+  // Simpan `now` di state (bukan Date.now() inline di render body) supaya
+  // pure: render hanya read state, tidak panggil impure Date.now().
+  // Initial value dengan lazy initializer — dievaluasi sekali saat mount.
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    if (!isThinking) return;
+    const interval = setInterval(() => {
+      setNow(Date.now());
+    }, 500);
+    return () => clearInterval(interval);
+  }, [isThinking]);
+
+  // Phase computed dari elapsed time — hanya relevan saat thinking.
+  // Label mulai dari "Liana memikirkan" (0–3s) sampai "Hampir selesai" (>15s).
+  const elapsedMs = isThinking ? now - pill.createdAt : 0;
+  const phase = elapsedToPhase(elapsedMs);
+
+  // Status text per state. Untuk thinking, lowercase phase.label biar
+  // smooth setelah "Liana " prefix (rendered via <strong>Liana</strong>).
   const statusText = isSending
     ? "terima pesannya..."
     : isThinking
-      ? "sedang menyusun jawaban"
+      ? phase.label.replace(/^Liana\s+/, "").toLowerCase()
       : isDone
         ? "sudah balas! Cek yuk"
         : pill.errorMessage ?? "belum bisa balas saat ini";
@@ -60,7 +76,7 @@ export function LianaStatusPill({
     : isError
       ? AlertCircle
       : isThinking
-        ? MessageCircle
+        ? phase.icon
         : Bot;
 
   return (
