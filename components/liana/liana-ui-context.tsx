@@ -121,7 +121,7 @@ export function LianaUIProvider({ userId, children }: LianaUIProviderProps) {
             return { ...p, resolvedAt: p.errorOverride.at };
           }
           if (!p.runId) return p;
-          const run = currentRuns.find((r) => r.id === p.runId);
+          const run = resolveRunForPill(p.runId, currentRuns);
           if (!run) return p;
           if (run.status === "done") {
             const at = run.delivered_at
@@ -285,7 +285,7 @@ function previewPrompt(prompt: string): string {
 function derivePillStatus(p: PillInternal, runs: LianaRun[]): PillStatus {
   if (p.errorOverride) return "error";
   if (!p.runId) return "sending";
-  const run = runs.find((r) => r.id === p.runId);
+  const run = resolveRunForPill(p.runId, runs);
   if (!run) {
     // Realtime row belum sampai — tapi karena runId udah ada (API sukses),
     // kita anggap state-nya "thinking" (Liana lagi process).
@@ -302,7 +302,24 @@ function deriveErrorMessage(
 ): string | null {
   if (p.errorOverride) return p.errorOverride.message;
   if (!p.runId) return null;
-  const run = runs.find((r) => r.id === p.runId);
+  const run = resolveRunForPill(p.runId, runs);
   if (run?.status === "error") return run.error_message;
   return null;
+}
+
+/**
+ * Defensive lookup: AskLianaButton SEHARUSNYA menyimpan dashboard PK
+ * (`liana_runs.id`) ke pill.runId, tapi kalau ada path yang masih kirim
+ * OpenClaw runId (cached client lama, race condition, dll), kita fallback
+ * cocokkan ke kolom `run_id`. Ini bikin pill resilient terhadap variant
+ * mana pun yang masuk — selama salah satu nge-link ke row yang ada.
+ */
+function resolveRunForPill(
+  pillRunId: string,
+  runs: LianaRun[],
+): LianaRun | undefined {
+  return (
+    runs.find((r) => r.id === pillRunId) ??
+    runs.find((r) => r.run_id === pillRunId)
+  );
 }
