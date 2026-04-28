@@ -176,13 +176,7 @@ function RunItem({
   run: LianaRun;
   botUsername?: string;
 }) {
-  const [expanded, setExpanded] = React.useState(
-    run.status === "pending" || isRecent(run.created_at),
-  );
-
-  const telegramUrl = botUsername
-    ? `https://t.me/${botUsername}`
-    : null;
+  const telegramUrl = botUsername ? `https://t.me/${botUsername}` : null;
 
   return (
     <li className="rounded-lg border border-border bg-card">
@@ -203,72 +197,180 @@ function RunItem({
         </time>
       </div>
 
-      {/* Prompt */}
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="block w-full px-3 py-2 text-left text-sm hover:bg-muted/50"
-      >
+      {/* Prompt — always visible */}
+      <div className="px-3 py-2 text-sm">
         <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           Pertanyaan
         </div>
-        <div className={cn("mt-0.5", !expanded && "line-clamp-2")}>
-          {run.prompt}
-        </div>
-      </button>
+        <div className="mt-0.5 whitespace-pre-wrap">{run.prompt}</div>
+      </div>
 
-      {/* Reply / status detail */}
-      {expanded && (
-        <div className="border-t border-border/50 px-3 py-2">
-          {run.status === "pending" && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-              <span>Menunggu Liana menjawab di Telegram...</span>
+      {/* Reply / status detail — always visible */}
+      <div className="border-t border-border/50 px-3 py-2">
+        {run.status === "pending" && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+            <span>Menunggu jawaban Liana...</span>
+          </div>
+        )}
+        {run.status === "done" && run.reply_text && (
+          <>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Jawaban Liana
             </div>
-          )}
-          {run.status === "done" && run.reply_text && (
-            <>
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Jawaban Liana
+            <ReplyContent text={run.reply_text} />
+            {run.delivered_at && (
+              <div className="mt-2 text-[10px] text-muted-foreground">
+                Terkirim {formatRelative(run.delivered_at)}
               </div>
-              <div className="mt-1 whitespace-pre-wrap text-sm leading-relaxed">
-                {run.reply_text}
-              </div>
-              {run.delivered_at && (
-                <div className="mt-1 text-[10px] text-muted-foreground">
-                  Terkirim {formatRelative(run.delivered_at)}
-                </div>
-              )}
-            </>
-          )}
-          {run.status === "error" && (
-            <div className="flex items-start gap-2 rounded-md bg-destructive/5 p-2 text-xs text-destructive">
-              <AlertCircle
-                className="mt-0.5 h-3.5 w-3.5 flex-shrink-0"
-                aria-hidden
-              />
-              <span>{run.error_message ?? "Terjadi error tidak diketahui."}</span>
-            </div>
-          )}
+            )}
+          </>
+        )}
+        {run.status === "error" && (
+          <div className="flex items-start gap-2 rounded-md bg-destructive/5 p-2 text-xs text-destructive">
+            <AlertCircle
+              className="mt-0.5 h-3.5 w-3.5 flex-shrink-0"
+              aria-hidden
+            />
+            <span>
+              {run.error_message ?? "Terjadi error tidak diketahui."}
+            </span>
+          </div>
+        )}
 
-          {/* Footer actions */}
-          {telegramUrl && (
-            <div className="mt-2 flex justify-end">
-              <a
-                href={telegramUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
-              >
-                Buka Telegram
-                <ExternalLink className="h-3 w-3" aria-hidden />
-              </a>
-            </div>
-          )}
-        </div>
-      )}
+        {/* Footer actions */}
+        {telegramUrl && (
+          <div className="mt-2 flex justify-end">
+            <a
+              href={telegramUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+            >
+              Buka di Telegram
+              <ExternalLink className="h-3 w-3" aria-hidden />
+            </a>
+          </div>
+        )}
+      </div>
     </li>
   );
+}
+
+/**
+ * Render reply text Liana dengan minimal markdown:
+ * - **bold** → <strong>
+ * - "1. " / "- " / "• " → numbered / bulleted list
+ * - whitespace + line breaks dipertahankan
+ *
+ * Bukan markdown parser full — cukup untuk format Liana yang umum.
+ * Tujuan: gak butuh dependency tambahan, render aman tanpa
+ * dangerouslySetInnerHTML.
+ */
+type ReplyBlock =
+  | { kind: "paragraph"; lines: string[] }
+  | { kind: "ul"; items: string[] }
+  | { kind: "ol"; items: string[] };
+
+function parseReplyBlocks(text: string): ReplyBlock[] {
+  const lines = text.split(/\r?\n/);
+  const out: ReplyBlock[] = [];
+  let cur: ReplyBlock | null = null;
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    const ulMatch = /^\s*(?:[-•])\s+(.*)$/.exec(line);
+    const olMatch = /^\s*(\d+)[.)]\s+(.*)$/.exec(line);
+
+    if (ulMatch) {
+      if (!cur || cur.kind !== "ul") {
+        if (cur) out.push(cur);
+        cur = { kind: "ul", items: [] };
+      }
+      cur.items.push(ulMatch[1]);
+    } else if (olMatch) {
+      if (!cur || cur.kind !== "ol") {
+        if (cur) out.push(cur);
+        cur = { kind: "ol", items: [] };
+      }
+      cur.items.push(olMatch[2]);
+    } else if (line === "") {
+      if (cur) {
+        out.push(cur);
+        cur = null;
+      }
+    } else {
+      if (!cur || cur.kind !== "paragraph") {
+        if (cur) out.push(cur);
+        cur = { kind: "paragraph", lines: [] };
+      }
+      cur.lines.push(line);
+    }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+function ReplyContent({ text }: { text: string }) {
+  const blocks = React.useMemo(() => parseReplyBlocks(text), [text]);
+
+  return (
+    <div className="mt-1 space-y-2 text-sm leading-relaxed">
+      {blocks.map((block, i) => {
+        if (block.kind === "ul") {
+          return (
+            <ul key={i} className="list-disc space-y-1 pl-5">
+              {block.items.map((it, j) => (
+                <li key={j}>{renderInline(it)}</li>
+              ))}
+            </ul>
+          );
+        }
+        if (block.kind === "ol") {
+          return (
+            <ol key={i} className="list-decimal space-y-1 pl-5">
+              {block.items.map((it, j) => (
+                <li key={j}>{renderInline(it)}</li>
+              ))}
+            </ol>
+          );
+        }
+        return (
+          <p key={i} className="whitespace-pre-wrap">
+            {block.lines.map((ln, j) => (
+              <React.Fragment key={j}>
+                {j > 0 && <br />}
+                {renderInline(ln)}
+              </React.Fragment>
+            ))}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Inline markdown: **bold** → <strong>. Aman, no HTML injection.
+ */
+function renderInline(text: string): React.ReactNode {
+  const parts: React.ReactNode[] = [];
+  const regex = /\*\*([^*]+)\*\*/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    parts.push(<strong key={key++}>{match[1]}</strong>);
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+  return parts;
 }
 
 function StatusIcon({ status }: { status: LianaRun["status"] }) {
@@ -295,10 +397,6 @@ function labelForStatus(status: LianaRun["status"]): string {
     case "error":
       return "Gagal";
   }
-}
-
-function isRecent(iso: string, withinMs = 5 * 60_000): boolean {
-  return Date.now() - new Date(iso).getTime() < withinMs;
 }
 
 function formatRelative(iso: string): string {
