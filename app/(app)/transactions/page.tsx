@@ -1,11 +1,14 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import { Building2 } from "lucide-react";
 
+import { RealtimeWatcher } from "@/components/realtime/realtime-watcher";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
 import { TransactionAddButton } from "@/components/transactions/transaction-add-button";
 import { TransactionFilters } from "@/components/transactions/transaction-filters";
 import { TransactionTable } from "@/components/transactions/transaction-table";
+import { Skeleton } from "@/components/ui/skeleton";
 import { getCurrentBusinessId } from "@/lib/finance/business";
 import { todayJakarta } from "@/lib/finance/format";
 import {
@@ -13,7 +16,7 @@ import {
   listTransactions,
   type TransactionFilters as Filters,
 } from "@/lib/finance/transactions/queries";
-import type { TransactionType } from "@/types/finance";
+import type { Category, TransactionType } from "@/types/finance";
 
 export const metadata: Metadata = {
   title: "Transaksi",
@@ -63,13 +66,14 @@ export default async function TransactionsPage({
     limit: 100,
   };
 
-  const [transactions, categories] = await Promise.all([
-    listTransactions(businessId, filters),
-    getCategoriesForBusiness(businessId),
-  ]);
+  // Categories diambil eager karena dipakai oleh filter UI + add button
+  // di bagian header (first paint). Transactions list di-stream via Suspense.
+  const categories = await getCategoriesForBusiness(businessId);
 
   return (
     <div className="space-y-6">
+      <RealtimeWatcher businessId={businessId} tables={["transactions"]} />
+
       <PageHeader
         title="Transaksi"
         description="Catat dan kelola pemasukan serta pengeluaran harian."
@@ -80,11 +84,61 @@ export default async function TransactionsPage({
 
       <TransactionFilters categories={categories} />
 
-      <TransactionTable
-        transactions={transactions}
-        categories={categories}
-        defaultDate={today}
-      />
+      <Suspense
+        key={JSON.stringify(filters)}
+        fallback={<TransactionTableSkeleton />}
+      >
+        <TransactionTableSection
+          businessId={businessId}
+          filters={filters}
+          categories={categories}
+          defaultDate={today}
+        />
+      </Suspense>
+    </div>
+  );
+}
+
+async function TransactionTableSection({
+  businessId,
+  filters,
+  categories,
+  defaultDate,
+}: {
+  businessId: string;
+  filters: Filters;
+  categories: Category[];
+  defaultDate: string;
+}) {
+  const transactions = await listTransactions(businessId, filters);
+  return (
+    <TransactionTable
+      transactions={transactions}
+      categories={categories}
+      defaultDate={defaultDate}
+    />
+  );
+}
+
+function TransactionTableSkeleton() {
+  return (
+    <div className="space-y-3 rounded-md border p-4">
+      <div className="grid grid-cols-5 gap-3">
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-full" />
+      </div>
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div key={i} className="grid grid-cols-5 gap-3">
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-9 w-full" />
+        </div>
+      ))}
     </div>
   );
 }

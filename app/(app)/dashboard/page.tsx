@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import { Building2 } from "lucide-react";
 
@@ -5,8 +6,10 @@ import { ActiveReceivables } from "@/components/dashboard/active-receivables";
 import { DailyChart } from "@/components/dashboard/daily-chart";
 import { RecentTransactions } from "@/components/dashboard/recent-transactions";
 import { SummaryCards } from "@/components/dashboard/summary-cards";
+import { RealtimeWatcher } from "@/components/realtime/realtime-watcher";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   getCurrentBusiness,
   getCurrentProfile,
@@ -52,27 +55,118 @@ export default async function DashboardPage() {
     );
   }
 
-  const [summary, daily, recentTx, activeRc] = await Promise.all([
-    getDashboardSummary(businessId, today),
-    getDailySeries(businessId, 7, today),
-    getRecentTransactions(businessId, 5),
-    getActiveReceivables(businessId, 5),
-  ]);
-
+  // Setiap section punya Suspense sendiri supaya bagian yang sudah ready
+  // bisa stream ke browser tanpa nunggu yang paling lambat.
   return (
     <div className="space-y-6">
+      <RealtimeWatcher
+        businessId={businessId}
+        tables={["transactions", "receivables"]}
+      />
+
       <PageHeader
         title={`Halo, ${firstName}.`}
         description={`Ringkasan keuangan ${business?.name ?? "UMKM"} · ${formatDateLong(today)}`}
       />
 
-      <SummaryCards summary={summary} />
-      <DailyChart data={daily} />
+      <Suspense fallback={<SummaryCardsSkeleton />}>
+        <SummarySection businessId={businessId} today={today} />
+      </Suspense>
+
+      <Suspense fallback={<DailyChartSkeleton />}>
+        <DailyChartSection businessId={businessId} today={today} />
+      </Suspense>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <RecentTransactions transactions={recentTx} />
-        <ActiveReceivables receivables={activeRc} todayRef={today} />
+        <Suspense fallback={<ListSkeleton title="Transaksi terbaru" />}>
+          <RecentTransactionsSection businessId={businessId} />
+        </Suspense>
+        <Suspense fallback={<ListSkeleton title="Piutang aktif" />}>
+          <ActiveReceivablesSection businessId={businessId} today={today} />
+        </Suspense>
       </div>
+    </div>
+  );
+}
+
+async function SummarySection({
+  businessId,
+  today,
+}: {
+  businessId: string;
+  today: string;
+}) {
+  const summary = await getDashboardSummary(businessId, today);
+  return <SummaryCards summary={summary} />;
+}
+
+async function DailyChartSection({
+  businessId,
+  today,
+}: {
+  businessId: string;
+  today: string;
+}) {
+  const daily = await getDailySeries(businessId, 7, today);
+  return <DailyChart data={daily} />;
+}
+
+async function RecentTransactionsSection({
+  businessId,
+}: {
+  businessId: string;
+}) {
+  const recentTx = await getRecentTransactions(businessId, 5);
+  return <RecentTransactions transactions={recentTx} />;
+}
+
+async function ActiveReceivablesSection({
+  businessId,
+  today,
+}: {
+  businessId: string;
+  today: string;
+}) {
+  const activeRc = await getActiveReceivables(businessId, 5);
+  return <ActiveReceivables receivables={activeRc} todayRef={today} />;
+}
+
+function SummaryCardsSkeleton() {
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="space-y-2 rounded-md border p-4">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-8 w-32" />
+          <Skeleton className="h-3 w-20" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DailyChartSkeleton() {
+  return (
+    <div className="space-y-4 rounded-md border p-4">
+      <Skeleton className="h-5 w-40" />
+      <Skeleton className="h-[260px] w-full" />
+    </div>
+  );
+}
+
+function ListSkeleton({ title }: { title: string }) {
+  return (
+    <div className="space-y-3 rounded-md border p-4">
+      <Skeleton className="h-5 w-32" aria-label={title} />
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="flex items-center justify-between gap-3">
+          <div className="space-y-1.5">
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-3 w-24" />
+          </div>
+          <Skeleton className="h-4 w-20" />
+        </div>
+      ))}
     </div>
   );
 }
