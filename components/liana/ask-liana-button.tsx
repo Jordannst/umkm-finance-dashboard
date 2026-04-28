@@ -199,21 +199,12 @@ export function AskLianaButton({
         body = null;
       }
 
-      // [DEBUG] log full response shape buat verify dashboardRunId ada
-      console.log("[AskLiana] /api/liana/ask response:", {
-        status: res.status,
-        ok: res.ok,
-        body,
-      });
-
       if (res.ok && body?.ok) {
         // Sukses — link DASHBOARD run id (DB PK) ke pill, BUKAN OpenClaw
         // runId. Pill nge-match terhadap rows[].id di tabel liana_runs,
         // jadi harus pakai PK yang sama. Realtime UPDATE pakai PK juga.
-        const pkToUse = body.data.dashboardRunId;
-        console.log("[AskLiana] setPillRunId", { pillId, pkToUse });
         if (pillId && lianaUI) {
-          lianaUI.setPillRunId(pillId, pkToUse);
+          lianaUI.setPillRunId(pillId, body.data.dashboardRunId);
         } else {
           // Fallback toast kalau pill stack gak available.
           toast.success("Liana sedang menjawab di Telegram", {

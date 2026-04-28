@@ -233,37 +233,22 @@ export function LianaUIProvider({ userId, children }: LianaUIProviderProps) {
   }, []);
 
   // Derive PillView[] dari internal state + runs.
-  const pillsView: PillView[] = React.useMemo(() => {
-    // [DEBUG] Setiap kali derive, log state matching agar gampang trace
-    // kapan pill resolve / kapan stuck.
-    if (pills.length > 0) {
-      console.log("[LianaUIProvider] derive pills", {
-        pills: pills.map((p) => ({
-          clientId: p.clientId.slice(0, 8),
+  const pillsView: PillView[] = React.useMemo(
+    () =>
+      pills.map((p) => {
+        const status = derivePillStatus(p, runs);
+        const errorMessage = deriveErrorMessage(p, runs);
+        return {
+          clientId: p.clientId,
+          promptPreview: previewPrompt(p.prompt),
           runId: p.runId,
-          errorOverride: p.errorOverride?.message,
-        })),
-        runsCount: runs.length,
-        runsBrief: runs.slice(0, 5).map((r) => ({
-          id: r.id,
-          run_id: r.run_id,
-          status: r.status,
-        })),
-      });
-    }
-    return pills.map((p) => {
-      const status = derivePillStatus(p, runs);
-      const errorMessage = deriveErrorMessage(p, runs);
-      return {
-        clientId: p.clientId,
-        promptPreview: previewPrompt(p.prompt),
-        runId: p.runId,
-        status,
-        errorMessage,
-        hovered: p.hovered,
-      };
-    });
-  }, [pills, runs]);
+          status,
+          errorMessage,
+          hovered: p.hovered,
+        };
+      }),
+    [pills, runs],
+  );
 
   const value: LianaUIContextValue = {
     runs,
