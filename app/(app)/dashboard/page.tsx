@@ -6,6 +6,8 @@ import { ActiveReceivables } from "@/components/dashboard/active-receivables";
 import { DailyChart } from "@/components/dashboard/daily-chart";
 import { RecentTransactions } from "@/components/dashboard/recent-transactions";
 import { SummaryCards } from "@/components/dashboard/summary-cards";
+import { AskLianaButton } from "@/components/liana/ask-liana-button";
+import { LianaSuggestionCard } from "@/components/liana/liana-suggestion-card";
 import { RealtimeWatcher } from "@/components/realtime/realtime-watcher";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
@@ -67,7 +69,15 @@ export default async function DashboardPage() {
       <PageHeader
         title={`Halo, ${firstName}.`}
         description={`Ringkasan keuangan ${business?.name ?? "UMKM"} · ${formatDateLong(today)}`}
+        actions={
+          <AskLianaButton
+            label="Tanya Liana rekap hari ini"
+            prompt="Liana, rekap keuangan hari ini dan beri catatan singkat untuk owner UMKM."
+          />
+        }
       />
+
+      <LianaSuggestionCard />
 
       <Suspense fallback={<SummaryCardsSkeleton />}>
         <SummarySection businessId={businessId} today={today} />

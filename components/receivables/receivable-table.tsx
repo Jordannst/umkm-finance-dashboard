@@ -1,5 +1,6 @@
 import { AlertCircle, Wallet } from "lucide-react";
 
+import { SourceBadge } from "@/components/liana/source-badge";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -78,8 +79,13 @@ export function ReceivableTable({
             return (
               <TableRow key={rc.id}>
                 <TableCell>
-                  <div className="space-y-0.5">
-                    <p className="text-sm font-medium">{rc.customer_name}</p>
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-medium">{rc.customer_name}</p>
+                      {rc.created_from_source === "chat" && (
+                        <SourceBadge source="chat" />
+                      )}
+                    </div>
                     {rc.note && (
                       <p className="line-clamp-1 max-w-xs text-xs text-muted-foreground">
                         {rc.note}

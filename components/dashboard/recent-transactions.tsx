@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowDownRight, ArrowUpRight, Receipt } from "lucide-react";
 
+import { SourceBadge } from "@/components/liana/source-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -81,12 +82,15 @@ export function RecentTransactions({ transactions }: RecentTransactionsProps) {
                     <p className="truncate text-sm font-medium">
                       {tx.note?.trim() || tx.category_name || meta.label}
                     </p>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                       <Badge variant="outline" className="border-transparent bg-muted/60 text-muted-foreground">
                         {tx.category_name ?? meta.label}
                       </Badge>
                       <span>·</span>
                       <span>{formatDate(tx.transaction_date)}</span>
+                      {tx.source === "chat" && (
+                        <SourceBadge source="chat" iconOnly className="ml-1" />
+                      )}
                     </div>
                   </div>
                   <p className={cn("shrink-0 text-sm font-semibold tabular-nums", meta.tone)}>

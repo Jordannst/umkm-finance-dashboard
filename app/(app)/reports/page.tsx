@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Building2 } from "lucide-react";
 
+import { AskLianaButton } from "@/components/liana/ask-liana-button";
 import { CategoryBreakdown } from "@/components/reports/category-breakdown";
 import { ExportCsvLink } from "@/components/reports/export-csv-link";
 import { PeriodSelector } from "@/components/reports/period-selector";
@@ -76,11 +77,17 @@ export default async function ReportsPage({
         title="Laporan"
         description={`${period.label} (${dayCount} hari). Rekap pemasukan, pengeluaran, dan laba.`}
         actions={
-          <ExportCsvLink
-            preset={period.preset}
-            from={period.from}
-            to={period.to}
-          />
+          <>
+            <AskLianaButton
+              label="Ringkas periode ini"
+              prompt={`Liana, ringkas laporan keuangan ${period.label.toLowerCase()} dengan bahasa owner UMKM. Sebutkan total pemasukan, pengeluaran, laba, dan kategori dominan.`}
+            />
+            <ExportCsvLink
+              preset={period.preset}
+              from={period.from}
+              to={period.to}
+            />
+          </>
         }
       />
 

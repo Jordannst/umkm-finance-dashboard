@@ -1,5 +1,6 @@
 import { Receipt } from "lucide-react";
 
+import { SourceBadge } from "@/components/liana/source-badge";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -96,10 +97,8 @@ export function TransactionTable({
                     )}
                   </div>
                 </TableCell>
-                <TableCell className="hidden text-xs text-muted-foreground md:table-cell">
-                  <Badge variant="outline" className="capitalize">
-                    {tx.source}
-                  </Badge>
+                <TableCell className="hidden md:table-cell">
+                  <SourceBadge source={tx.source} />
                 </TableCell>
                 <TableCell
                   className={cn(

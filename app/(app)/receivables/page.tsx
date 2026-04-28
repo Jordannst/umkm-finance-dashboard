@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import type { Metadata } from "next";
 import { Building2 } from "lucide-react";
 
+import { AskLianaButton } from "@/components/liana/ask-liana-button";
 import { ReceivableAddButton } from "@/components/receivables/receivable-add-button";
 import { ReceivableFilters } from "@/components/receivables/receivable-filters";
 import { ReceivableTable } from "@/components/receivables/receivable-table";
@@ -79,7 +80,19 @@ export default async function ReceivablesPage({
       <PageHeader
         title="Piutang"
         description="Pantau pelanggan yang belum bayar dan catat pelunasan. Piutang baru tidak masuk pemasukan sampai dibayar."
-        actions={<ReceivableAddButton categories={receivableCategories} />}
+        actions={
+          <>
+            <AskLianaButton
+              label="Cek piutang aktif"
+              prompt="Liana, siapa saja yang masih punya piutang aktif? Ringkas nama, nominal, dan statusnya."
+            />
+            <AskLianaButton
+              label="Buat reminder piutang"
+              prompt="Liana, bantu buat pesan reminder yang sopan untuk pelanggan yang belum bayar piutangnya. Sertakan nominal dan tanggal jatuh tempo."
+            />
+            <ReceivableAddButton categories={receivableCategories} />
+          </>
+        }
       />
 
       <ReceivableFilters />

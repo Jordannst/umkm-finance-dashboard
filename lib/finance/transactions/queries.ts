@@ -1,7 +1,12 @@
 import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
-import type { Category, Transaction, TransactionType } from "@/types/finance";
+import type {
+  Category,
+  DataSource,
+  Transaction,
+  TransactionType,
+} from "@/types/finance";
 
 export interface TransactionFilters {
   from?: string | null; // YYYY-MM-DD
@@ -9,6 +14,7 @@ export interface TransactionFilters {
   type?: TransactionType | "all" | null;
   categoryId?: string | null;
   search?: string | null;
+  source?: DataSource | "all" | null;
   limit?: number;
 }
 
@@ -41,6 +47,9 @@ export async function listTransactions(
   }
   if (filters.categoryId) {
     query = query.eq("category_id", filters.categoryId);
+  }
+  if (filters.source && filters.source !== "all") {
+    query = query.eq("source", filters.source);
   }
   if (filters.search?.trim()) {
     const term = filters.search.trim().replace(/[%_]/g, "");

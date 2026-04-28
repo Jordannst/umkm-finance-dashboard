@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import type { Metadata } from "next";
 import { Building2 } from "lucide-react";
 
+import { AskLianaButton } from "@/components/liana/ask-liana-button";
 import { RealtimeWatcher } from "@/components/realtime/realtime-watcher";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
@@ -16,7 +17,7 @@ import {
   listTransactions,
   type TransactionFilters as Filters,
 } from "@/lib/finance/transactions/queries";
-import type { Category, TransactionType } from "@/types/finance";
+import type { Category, DataSource, TransactionType } from "@/types/finance";
 
 export const metadata: Metadata = {
   title: "Transaksi",
@@ -31,6 +32,7 @@ interface TransactionsPageProps {
     type?: string;
     categoryId?: string;
     search?: string;
+    source?: string;
   }>;
 }
 
@@ -63,6 +65,7 @@ export default async function TransactionsPage({
     type: normalizeType(sp.type),
     categoryId: sp.categoryId ?? null,
     search: sp.search ?? null,
+    source: normalizeSource(sp.source),
     limit: 100,
   };
 
@@ -78,7 +81,17 @@ export default async function TransactionsPage({
         title="Transaksi"
         description="Catat dan kelola pemasukan serta pengeluaran harian."
         actions={
-          <TransactionAddButton categories={categories} defaultDate={today} />
+          <>
+            <AskLianaButton
+              label="Cek transaksi terakhir"
+              prompt="Liana, cek transaksi terakhir di dashboard dan ringkas 5 transaksi terbaru."
+            />
+            <AskLianaButton
+              label="Pengeluaran terbesar"
+              prompt="Liana, cari pengeluaran terbesar minggu ini dan beri saran singkat."
+            />
+            <TransactionAddButton categories={categories} defaultDate={today} />
+          </>
         }
       />
 
@@ -149,6 +162,13 @@ function normalizeType(value: string | undefined): TransactionType | "all" {
     value === "expense" ||
     value === "receivable_payment"
   ) {
+    return value;
+  }
+  return "all";
+}
+
+function normalizeSource(value: string | undefined): DataSource | "all" {
+  if (value === "chat" || value === "dashboard" || value === "system") {
     return value;
   }
   return "all";
