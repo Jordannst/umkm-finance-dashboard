@@ -17,6 +17,7 @@ import { formatLatencyBreakdown } from "@/lib/finance/liana/format";
 import { cn } from "@/lib/utils";
 
 import { useLianaUI } from "./liana-ui-context";
+import { TypingDots } from "./typing-dots";
 
 interface LianaChatPanelProps {
   /** Username bot Telegram untuk tombol "Buka di Telegram". Optional. */
@@ -251,9 +252,9 @@ function RunItem({
       {/* Reply / status detail — always visible */}
       <div className="border-t border-border/50 px-3 py-2">
         {run.status === "pending" && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-            <span>Menunggu jawaban Liana...</span>
+          <div className="flex items-center gap-2 text-xs italic text-muted-foreground">
+            <span>Liana sedang mengetik</span>
+            <TypingDots />
           </div>
         )}
         {run.status === "done" && run.reply_text && (
