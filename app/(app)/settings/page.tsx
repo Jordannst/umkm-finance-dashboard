@@ -4,6 +4,7 @@ import { Building2 } from "lucide-react";
 import { BusinessForm } from "@/components/settings/business-form";
 import { CategoriesSection } from "@/components/settings/categories-section";
 import { ProfileForm } from "@/components/settings/profile-form";
+import { TelegramLinkForm } from "@/components/settings/telegram-link-form";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
 import {
@@ -42,6 +43,10 @@ export default async function SettingsPage() {
     );
   }
 
+  // Bot username untuk deep link Telegram. Diambil dari env supaya bisa
+  // beda antara dev/staging/prod, tanpa hardcode.
+  const botUsername = process.env.NEXT_PUBLIC_OPENCLAW_BOT_USERNAME ?? null;
+
   if (!business || !profile.business_id) {
     return (
       <div className="space-y-6">
@@ -49,7 +54,10 @@ export default async function SettingsPage() {
           title="Pengaturan"
           description="Kelola profil dan kategori transaksi."
         />
-        <ProfileForm profile={profile} email={email} />
+        <div className="grid gap-6 lg:grid-cols-2">
+          <ProfileForm profile={profile} email={email} />
+          <TelegramLinkForm profile={profile} botUsername={botUsername} />
+        </div>
         <EmptyState
           icon={Building2}
           title="Belum ada bisnis terhubung"
@@ -72,6 +80,8 @@ export default async function SettingsPage() {
         <ProfileForm profile={profile} email={email} />
         <BusinessForm business={business} />
       </div>
+
+      <TelegramLinkForm profile={profile} botUsername={botUsername} />
 
       <CategoriesSection
         income={categories.income}

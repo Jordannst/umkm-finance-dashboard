@@ -1,18 +1,28 @@
 "use client";
 
 import * as React from "react";
-import { Bot, Check, Copy } from "lucide-react";
+import { Bot, Check, Copy, Send } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+export type AskLianaMode = "telegram" | "copy" | "auto";
+
 export interface AskLianaButtonProps {
-  /** Prompt yang akan di-copy ke clipboard. */
+  /** Prompt yang akan dikirim ke Liana / di-copy. */
   prompt: string;
   /** Label yang tampil di tombol. Default: 'Tanya Liana'. */
   label?: string;
-  /** Variant button. Default 'outline' supaya tidak mendominasi UI. */
+  /**
+   * Mode tombol:
+   * - 'telegram' (preferred): buka https://t.me/<bot>?text=<prompt>
+   *   sehingga user langsung lihat prompt di chat Liana, tinggal pencet Send.
+   * - 'copy': copy prompt ke clipboard, user paste manual.
+   * - 'auto' (default): pakai 'telegram' kalau env
+   *   NEXT_PUBLIC_OPENCLAW_BOT_USERNAME ada, fallback ke 'copy'.
+   */
+  mode?: AskLianaMode;
   variant?:
     | "default"
     | "outline"
@@ -22,25 +32,28 @@ export interface AskLianaButtonProps {
     | "link";
   size?: "default" | "sm" | "lg" | "icon";
   className?: string;
-  /** Tampilkan icon Bot kiri. Default true. */
+  /** Tampilkan icon kiri. Default true. */
   withIcon?: boolean;
 }
 
 /**
- * Tombol Liana yang copy prompt ke clipboard saat diklik, lalu menampilkan
- * toast supaya user tahu prompt sudah siap di-paste ke Telegram/WhatsApp.
+ * Tombol "Tanya Liana".
  *
- * Disain MVP: belum ada chat embedded, copy prompt sudah cukup buat demo.
+ * - Mode `telegram` (default kalau bot username di-set): klik tombol membuka
+ *   tab baru ke `https://t.me/<bot>?text=<prompt>`. User tinggal pencet Send.
+ *   Hilangkan langkah copy-paste sepenuhnya.
+ * - Mode `copy`: legacy fallback, copy prompt ke clipboard.
  */
 export function AskLianaButton({
   prompt,
   label = "Tanya Liana",
+  mode = "auto",
   variant = "outline",
   size = "sm",
   className,
   withIcon = true,
 }: AskLianaButtonProps) {
-  const [copied, setCopied] = React.useState(false);
+  const [done, setDone] = React.useState(false);
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   React.useEffect(() => {
@@ -49,9 +62,22 @@ export function AskLianaButton({
     };
   }, []);
 
+  // Resolve bot username dari env (only di client). Empty string juga
+  // di-treat sebagai "tidak ada".
+  const botUsername = (
+    process.env.NEXT_PUBLIC_OPENCLAW_BOT_USERNAME ?? ""
+  ).trim();
+  const resolvedMode: "telegram" | "copy" =
+    mode === "auto" ? (botUsername ? "telegram" : "copy") : mode;
+
+  function flashDone() {
+    setDone(true);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setDone(false), 1800);
+  }
+
   async function handleCopy() {
     try {
-      // Modern clipboard API (HTTPS / localhost only)
       if (
         typeof navigator !== "undefined" &&
         navigator.clipboard?.writeText
@@ -69,12 +95,10 @@ export function AskLianaButton({
         document.execCommand("copy");
         document.body.removeChild(textarea);
       }
-      setCopied(true);
       toast.success("Prompt disalin", {
         description: "Tinggal kirim ke Liana di Telegram.",
       });
-      if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => setCopied(false), 1800);
+      flashDone();
     } catch (err) {
       console.error("[AskLianaButton] copy failed:", err);
       toast.error("Gagal menyalin prompt", {
@@ -83,26 +107,73 @@ export function AskLianaButton({
     }
   }
 
-  const Icon = copied ? Check : withIcon ? Bot : Copy;
+  function handleTelegramOpen() {
+    if (!botUsername) {
+      // Safety: kalau mode dipaksa 'telegram' tapi env kosong
+      void handleCopy();
+      return;
+    }
+    const url = `https://t.me/${botUsername}?text=${encodeURIComponent(prompt)}`;
+    const win =
+      typeof window !== "undefined"
+        ? window.open(url, "_blank", "noopener,noreferrer")
+        : null;
+
+    if (!win) {
+      // Popup blocker / browser policy. Fallback otomatis ke copy.
+      console.warn(
+        "[AskLianaButton] window.open blocked, fallback to clipboard",
+      );
+      void handleCopy();
+      return;
+    }
+    toast.success("Membuka Liana di Telegram", {
+      description: "Tinggal pencet Send di Telegram.",
+    });
+    flashDone();
+  }
+
+  const onClick =
+    resolvedMode === "telegram" ? handleTelegramOpen : handleCopy;
+
+  // Icon pilih sesuai state + mode.
+  // - done    -> Check (semua mode)
+  // - telegram -> Send (icon paper plane, sesuai aksi "kirim")
+  // - copy + withIcon -> Bot (branded Liana)
+  // - copy tanpa withIcon -> Copy (utility ikon)
+  const ActiveIcon = done
+    ? Check
+    : resolvedMode === "telegram"
+      ? Send
+      : withIcon
+        ? Bot
+        : Copy;
+
+  const doneLabel =
+    resolvedMode === "telegram" ? "Telegram dibuka!" : "Disalin!";
+  const ariaLabel =
+    resolvedMode === "telegram"
+      ? `Kirim ke Liana di Telegram: ${label}`
+      : `Salin prompt: ${label}`;
 
   return (
     <Button
       type="button"
       variant={variant}
       size={size}
-      onClick={handleCopy}
+      onClick={onClick}
       className={cn(
         "gap-1.5",
-        copied && "border-success text-success",
+        done && "border-success text-success",
         className,
       )}
-      aria-label={`Salin prompt: ${label}`}
+      aria-label={ariaLabel}
     >
-      <Icon
-        className={cn("h-3.5 w-3.5", !copied && withIcon && "text-primary")}
+      <ActiveIcon
+        className={cn("h-3.5 w-3.5", !done && withIcon && "text-primary")}
         aria-hidden
       />
-      <span>{copied ? "Disalin!" : label}</span>
+      <span>{done ? doneLabel : label}</span>
     </Button>
   );
 }

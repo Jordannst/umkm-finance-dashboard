@@ -23,6 +23,8 @@ export interface Profile {
   business_id: string | null;
   full_name: string | null;
   role: UserRole;
+  telegram_chat_id: string | null;
+  telegram_linked_at: string | null;
   created_at: string;
   updated_at: string;
 }

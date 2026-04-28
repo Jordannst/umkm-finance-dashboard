@@ -77,6 +77,90 @@ export async function updateProfileAction(
 }
 
 // =====================================================================
+// TELEGRAM LINK (integrasi Liana via OpenClaw /hooks/agent)
+// =====================================================================
+
+const telegramSchema = z.object({
+  // Telegram chat_id biasanya integer panjang (private chat: positive,
+  // group: negative). Validasi: numeric string, panjang wajar.
+  telegram_chat_id: z
+    .string()
+    .trim()
+    .regex(/^-?\d{4,20}$/u, {
+      message:
+        "Chat ID tidak valid. Harus angka (boleh negatif untuk grup), 4-20 digit.",
+    }),
+});
+
+export type TelegramLinkFormState = {
+  ok: boolean;
+  message?: string;
+  fieldErrors?: Partial<Record<"telegram_chat_id", string>>;
+};
+
+export async function updateTelegramLinkAction(
+  _prev: TelegramLinkFormState = { ok: false },
+  formData: FormData,
+): Promise<TelegramLinkFormState> {
+  const profile = await getCurrentProfile();
+  if (!profile) {
+    return { ok: false, message: "Sesi tidak valid. Silakan login ulang." };
+  }
+
+  const parsed = telegramSchema.safeParse({
+    telegram_chat_id: formData.get("telegram_chat_id"),
+  });
+  if (!parsed.success) {
+    return { ok: false, fieldErrors: flattenIssues(parsed.error.issues) };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("profiles")
+    .update({
+      telegram_chat_id: parsed.data.telegram_chat_id,
+      telegram_linked_at: new Date().toISOString(),
+    })
+    .eq("id", profile.id);
+
+  if (error) {
+    console.error("[updateTelegramLinkAction]:", error.message);
+    return { ok: false, message: error.message };
+  }
+
+  revalidatePath("/settings");
+  // Halaman lain (dashboard, transactions, dll) pakai info ini untuk
+  // menentukan mode tombol "Tanya Liana".
+  revalidatePath("/", "layout");
+  return { ok: true, message: "Akun Telegram berhasil dihubungkan." };
+}
+
+export async function unlinkTelegramAction(): Promise<TelegramLinkFormState> {
+  const profile = await getCurrentProfile();
+  if (!profile) {
+    return { ok: false, message: "Sesi tidak valid." };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("profiles")
+    .update({
+      telegram_chat_id: null,
+      telegram_linked_at: null,
+    })
+    .eq("id", profile.id);
+
+  if (error) {
+    console.error("[unlinkTelegramAction]:", error.message);
+    return { ok: false, message: error.message };
+  }
+
+  revalidatePath("/settings");
+  revalidatePath("/", "layout");
+  return { ok: true, message: "Akun Telegram diputuskan." };
+}
+
+// =====================================================================
 // BUSINESS
 // =====================================================================
 
