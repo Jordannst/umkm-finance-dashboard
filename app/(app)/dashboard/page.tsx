@@ -4,6 +4,7 @@ import { Building2 } from "lucide-react";
 
 import { ActiveReceivables } from "@/components/dashboard/active-receivables";
 import { DailyChart } from "@/components/dashboard/daily-chart";
+import { LianaInsightsCard } from "@/components/dashboard/liana-insights-card";
 import { RecentTransactions } from "@/components/dashboard/recent-transactions";
 import { SummaryCards } from "@/components/dashboard/summary-cards";
 import { AskLianaButton } from "@/components/liana/ask-liana-button";
@@ -17,6 +18,7 @@ import {
   getCurrentProfile,
 } from "@/lib/finance/business";
 import { formatDateLong, todayJakarta } from "@/lib/finance/format";
+import { getDashboardInsights } from "@/lib/finance/insights";
 import {
   getActiveReceivables,
   getDailySeries,
@@ -83,6 +85,10 @@ export default async function DashboardPage() {
         <SummarySection businessId={businessId} today={today} />
       </Suspense>
 
+      <Suspense fallback={<InsightsCardSkeleton />}>
+        <InsightsSection businessId={businessId} today={today} />
+      </Suspense>
+
       <Suspense fallback={<DailyChartSkeleton />}>
         <DailyChartSection businessId={businessId} today={today} />
       </Suspense>
@@ -119,6 +125,17 @@ async function DailyChartSection({
 }) {
   const daily = await getDailySeries(businessId, 7, today);
   return <DailyChart data={daily} />;
+}
+
+async function InsightsSection({
+  businessId,
+  today,
+}: {
+  businessId: string;
+  today: string;
+}) {
+  const insights = await getDashboardInsights(businessId, today);
+  return <LianaInsightsCard insights={insights} />;
 }
 
 async function RecentTransactionsSection({
@@ -160,6 +177,32 @@ function DailyChartSkeleton() {
     <div className="space-y-4 rounded-md border p-4">
       <Skeleton className="h-5 w-40" />
       <Skeleton className="h-[260px] w-full" />
+    </div>
+  );
+}
+
+function InsightsCardSkeleton() {
+  return (
+    <div className="space-y-4 rounded-md border p-4">
+      <div className="flex items-center gap-3">
+        <Skeleton className="h-10 w-10 rounded-full" />
+        <div className="space-y-1.5">
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="h-3 w-48" />
+        </div>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        {Array.from({ length: 2 }).map((_, i) => (
+          <div key={i} className="flex items-start gap-3 rounded-md border p-3">
+            <Skeleton className="h-8 w-8 rounded-full" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-4 w-full max-w-[180px]" />
+              <Skeleton className="h-3 w-full max-w-[220px]" />
+              <Skeleton className="h-6 w-24" />
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
