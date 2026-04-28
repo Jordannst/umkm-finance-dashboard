@@ -41,6 +41,28 @@ export interface OpenClawAskParams {
    * double-submit dari user double-click.
    */
   idempotencyKey?: string;
+  /**
+   * Callback config — Liana POST balik ke endpoint kita waktu reply
+   * sudah dikirim ke Telegram (atau gagal). Dipakai dashboard untuk
+   * update inline chat panel real-time tanpa polling.
+   *
+   * Hanya dikirim ke OpenClaw kalau `callback.url` & `callback.token`
+   * dua-duanya ada. Kalau Liana belum support fitur ini, dia akan
+   * abaikan field ini (graceful degradation — request tetap dilayani,
+   * cuma tidak ada notifikasi delivery di dashboard).
+   */
+  callback?: {
+    /** Endpoint yang Liana POST setelah delivery sukses/gagal. */
+    url: string;
+    /** Bearer token yang Liana sertakan di header Authorization. */
+    token: string;
+    /**
+     * Metadata yang Liana echo balik di body callback. Pakai untuk
+     * passing identifier internal seperti `dashboardRunId` (UUID row
+     * di tabel liana_runs).
+     */
+    metadata?: Record<string, string>;
+  };
 }
 
 export interface OpenClawAskSuccess {
@@ -133,6 +155,22 @@ export async function askLiana(
     channel: "telegram",
     to: `telegram:${params.telegramChatId}`,
     timeoutSeconds: 60,
+    // Callback supaya Liana POST balik waktu reply sudah dikirim ke
+    // Telegram. Liana yang belum support fitur ini akan abaikan field
+    // ini (request tetap dilayani; tidak ada notifikasi delivery).
+    ...(params.callback?.url && params.callback?.token
+      ? {
+          callback: {
+            url: params.callback.url,
+            headers: {
+              Authorization: `Bearer ${params.callback.token}`,
+              "Content-Type": "application/json",
+            },
+            metadata: params.callback.metadata ?? {},
+            events: ["delivered", "error"],
+          },
+        }
+      : {}),
   });
 
   let res: Response;

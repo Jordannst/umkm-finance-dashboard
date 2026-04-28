@@ -6,6 +6,11 @@ import {
   apiOk,
   zodIssuesToFieldErrors,
 } from "@/lib/api/responses";
+import {
+  attachRunIdToRun,
+  insertPendingRun,
+  markRunError,
+} from "@/lib/finance/liana/runs";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -70,10 +75,10 @@ export async function POST(request: Request) {
     );
   }
 
-  // 3. Lookup telegram_chat_id user
+  // 3. Lookup telegram_chat_id + business_id user
   const { data: profile, error: profileErr } = await supabase
     .from("profiles")
-    .select("telegram_chat_id, full_name")
+    .select("telegram_chat_id, full_name, business_id")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -92,8 +97,32 @@ export async function POST(request: Request) {
       412,
     );
   }
+  if (!profile.business_id) {
+    return apiError(
+      "business_not_found",
+      "Profile tidak terhubung ke business manapun.",
+      412,
+    );
+  }
 
-  // 4. Build idempotency key default: bucket 5 menit (sama dengan dedup
+  // 4. Insert pending run di tabel `liana_runs` SEBELUM forward ke Liana.
+  //    Tujuan: dashboard punya row yang bisa di-subscribe Realtime sejak
+  //    detik pertama. Kalau forward ke Liana gagal, kita tinggal update
+  //    status='error' di row yang sama.
+  const run = await insertPendingRun({
+    businessId: profile.business_id,
+    userId: user.id,
+    prompt: parsed.data.prompt,
+  });
+  if (!run) {
+    return apiError(
+      "persist_failed",
+      "Gagal menyimpan request ke database.",
+      500,
+    );
+  }
+
+  // 5. Build idempotency key default: bucket 5 menit (sama dengan dedup
   //    window OpenClaw) dari userId + slug prompt. Ini cegah double-click
   //    user kirim 2 request identik.
   const minuteBucket = Math.floor(Date.now() / (5 * 60 * 1000));
@@ -105,16 +134,42 @@ export async function POST(request: Request) {
     parsed.data.idempotencyKey ??
     `dashboard:${user.id}:${minuteBucket}:${promptSlug}`;
 
-  // 5. Forward ke OpenClaw
+  // 6. Build callback config — Liana POST balik waktu reply terkirim.
+  //    Reuse OPENCLAW_HOOK_TOKEN sebagai bearer token (symmetric: token
+  //    yang sama dipakai outbound & inbound). Liana yang belum support
+  //    fitur callback akan abaikan field ini.
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const hookToken = process.env.OPENCLAW_HOOK_TOKEN?.trim();
+  const callback =
+    appUrl && hookToken
+      ? {
+          url: new URL("/api/liana/run-callback", appUrl).toString(),
+          token: hookToken,
+          metadata: {
+            dashboardRunId: run.id,
+            userId: user.id,
+            businessId: profile.business_id,
+          },
+        }
+      : undefined;
+
+  // 7. Forward ke OpenClaw
   const result = await askLiana({
     message: parsed.data.prompt,
     telegramChatId: profile.telegram_chat_id,
     name: profile.full_name ?? "UMKM Finance Dashboard",
     sessionKey: `hook:umkm-dashboard:${user.id}`,
     idempotencyKey,
+    callback,
   });
 
   if (!result.ok) {
+    // Mark run sebagai error supaya dashboard bisa render error state
+    // di inline chat panel.
+    await markRunError({
+      id: run.id,
+      errorMessage: `${result.reason}: ${result.message}`,
+    });
     const res = apiError(result.reason, result.message, result.status);
     if (
       result.reason === "rate_limited" &&
@@ -125,5 +180,11 @@ export async function POST(request: Request) {
     return res;
   }
 
-  return apiOk({ runId: result.runId });
+  // 8. Link runId dari OpenClaw ke row liana_runs (best effort, non-blocking).
+  await attachRunIdToRun({ id: run.id, runId: result.runId });
+
+  return apiOk({
+    runId: result.runId,
+    dashboardRunId: run.id,
+  });
 }

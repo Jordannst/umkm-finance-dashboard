@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/layout/app-shell";
+import { LianaChatPanel } from "@/components/liana/liana-chat-panel";
 import {
   getCurrentBusiness,
   getCurrentProfile,
@@ -18,6 +19,7 @@ export default async function AppLayout({
   }
 
   const business = await getCurrentBusiness();
+  const botUsername = process.env.NEXT_PUBLIC_OPENCLAW_BOT_USERNAME?.trim() || undefined;
 
   return (
     <AppShell
@@ -25,6 +27,7 @@ export default async function AppLayout({
       ownerName={profile.full_name ?? null}
     >
       {children}
+      <LianaChatPanel userId={profile.id} botUsername={botUsername} />
     </AppShell>
   );
 }
