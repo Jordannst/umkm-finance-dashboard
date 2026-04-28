@@ -7,9 +7,9 @@ import {
   zodIssuesToFieldErrors,
 } from "@/lib/api/responses";
 import {
-  attachRunIdToRun,
   insertPendingRun,
   markRunError,
+  markRunForwarded,
 } from "@/lib/finance/liana/runs";
 import { createClient } from "@/lib/supabase/server";
 
@@ -180,8 +180,15 @@ export async function POST(request: Request) {
     return res;
   }
 
-  // 8. Link runId dari OpenClaw ke row liana_runs (best effort, non-blocking).
-  await attachRunIdToRun({ id: run.id, runId: result.runId });
+  // 8. Mark run as forwarded — set both run_id (link ke OpenClaw) dan
+  //    forwarded_at (timestamp untuk network vs LLM latency split).
+  //    Best effort, non-blocking: kalau gagal, run tetep complete normally,
+  //    cuma latency display nya akan hide karena forwarded_at null.
+  await markRunForwarded({
+    id: run.id,
+    runId: result.runId,
+    forwardedAt: new Date().toISOString(),
+  });
 
   return apiOk({
     runId: result.runId,

@@ -26,6 +26,11 @@ export interface LianaRun {
   status: LianaRunStatus;
   error_message: string | null;
   delivered_at: string | null;
+  /** Saat /api/liana/ask berhasil forward ke OpenClaw (sebelum LLM mulai
+   *  proses). Bareng dengan created_at + delivered_at, dipakai buat
+   *  hitung breakdown latency network vs LLM. Null kalau forward belum
+   *  succeed atau row di-create sebelum migration 0009. */
+  forwarded_at: string | null;
   created_at: string;
 }
 
@@ -59,20 +64,27 @@ export async function insertPendingRun(params: {
 }
 
 /**
- * Set runId setelah berhasil forward ke OpenClaw. Status tetap 'pending'
- * sampai callback masuk.
+ * Set runId + forwarded_at setelah berhasil forward ke OpenClaw.
+ * Status tetap 'pending' sampai callback masuk.
+ *
+ * Single UPDATE supaya kedua kolom konsisten di Realtime payload
+ * (gak ada interim state dengan run_id tapi forwarded_at masih null).
  */
-export async function attachRunIdToRun(params: {
+export async function markRunForwarded(params: {
   id: string;
   runId: string;
+  forwardedAt: string; // ISO string, biasanya new Date().toISOString()
 }): Promise<void> {
   const supabase = createAdminClient();
   const { error } = await supabase
     .from("liana_runs")
-    .update({ run_id: params.runId })
+    .update({
+      run_id: params.runId,
+      forwarded_at: params.forwardedAt,
+    })
     .eq("id", params.id);
   if (error) {
-    console.error("[liana_runs.attachRunIdToRun]:", error.message);
+    console.error("[liana_runs.markRunForwarded]:", error.message);
   }
 }
 
