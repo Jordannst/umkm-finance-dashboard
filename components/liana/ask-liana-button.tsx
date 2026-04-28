@@ -43,7 +43,13 @@ export interface AskLianaButtonProps {
 
 interface AskApiSuccess {
   ok: true;
-  data: { runId: string };
+  data: {
+    /** OpenClaw run id (dipakai server-side untuk match callback). */
+    runId: string;
+    /** Database PK — ID row di tabel `liana_runs`. INI yang harus dipakai
+     *  client untuk match dengan Realtime payload + pill state. */
+    dashboardRunId: string;
+  };
 }
 
 interface AskApiError {
@@ -194,10 +200,11 @@ export function AskLianaButton({
       }
 
       if (res.ok && body?.ok) {
-        // Sukses — link runId ke pill supaya pill nge-track lifecycle
-        // run lewat Realtime (pending → done).
+        // Sukses — link DASHBOARD run id (DB PK) ke pill, BUKAN OpenClaw
+        // runId. Pill nge-match terhadap rows[].id di tabel liana_runs,
+        // jadi harus pakai PK yang sama. Realtime UPDATE pakai PK juga.
         if (pillId && lianaUI) {
-          lianaUI.setPillRunId(pillId, body.data.runId);
+          lianaUI.setPillRunId(pillId, body.data.dashboardRunId);
         } else {
           // Fallback toast kalau pill stack gak available.
           toast.success("Liana sedang menjawab di Telegram", {
