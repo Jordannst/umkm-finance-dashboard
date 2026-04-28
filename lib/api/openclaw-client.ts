@@ -26,6 +26,13 @@ export interface OpenClawAskParams {
    * Session continuity per user. Format yang direkomendasikan:
    *   `hook:umkm-dashboard:<userId>`
    * supaya context Liana untuk user X tetap konsisten antar request.
+   *
+   * CATATAN: hanya akan dikirim ke OpenClaw kalau env
+   * `OPENCLAW_HOOKS_ALLOW_SESSION_KEY=1` (atau `true`). Default OpenClaw
+   * blokir field ini dari external hooks dengan error:
+   *   "sessionKey is disabled for externally supplied hooks".
+   * Untuk enable: di VPS set `hooks.allowRequestSessionKey=true` lalu
+   * restart openclaw-gateway, baru flip env Vercel.
    */
   sessionKey?: string;
   /**
@@ -70,6 +77,12 @@ export async function askLiana(
   const baseUrl = process.env.OPENCLAW_HOOKS_URL;
   const token = process.env.OPENCLAW_HOOK_TOKEN;
   const path = process.env.OPENCLAW_HOOKS_PATH ?? "/hooks/agent";
+  // OpenClaw default blokir `sessionKey` dari external hooks (validation_failed).
+  // Aktifkan hanya kalau VPS sudah set `hooks.allowRequestSessionKey=true`.
+  const allowSessionKey =
+    process.env.OPENCLAW_HOOKS_ALLOW_SESSION_KEY?.trim() === "1" ||
+    process.env.OPENCLAW_HOOKS_ALLOW_SESSION_KEY?.trim().toLowerCase() ===
+      "true";
 
   if (!baseUrl || !token) {
     return {
@@ -109,7 +122,12 @@ export async function askLiana(
   const body = JSON.stringify({
     name: params.name ?? "UMKM Finance Dashboard",
     message: params.message,
-    ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
+    // sessionKey hanya dikirim kalau OpenClaw enable allowRequestSessionKey
+    // (lihat OPENCLAW_HOOKS_ALLOW_SESSION_KEY). Default OpenClaw reject 400
+    // dengan message "sessionKey is disabled for externally supplied hooks".
+    ...(allowSessionKey && params.sessionKey
+      ? { sessionKey: params.sessionKey }
+      : {}),
     wakeMode: "now",
     deliver: true,
     channel: "telegram",
