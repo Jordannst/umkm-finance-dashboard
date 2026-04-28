@@ -13,6 +13,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import type { LianaRun } from "@/hooks/use-liana-runs";
+import { formatLatencyBreakdown } from "@/lib/finance/liana/format";
 import { cn } from "@/lib/utils";
 
 import { useLianaUI } from "./liana-ui-context";
@@ -205,7 +206,7 @@ function RunItem({
       data-run-id={run.id}
       className="rounded-lg border border-border bg-card"
     >
-      {/* Header: status + timestamp */}
+      {/* Header: status + timestamp + latency breakdown */}
       <div className="flex items-center justify-between gap-2 border-b border-border/50 px-3 py-2 text-xs">
         <div className="flex items-center gap-1.5">
           <StatusIcon status={run.status} />
@@ -213,13 +214,30 @@ function RunItem({
             {labelForStatus(run.status)}
           </span>
         </div>
-        <time
-          dateTime={run.created_at}
-          className="text-muted-foreground"
-          title={new Date(run.created_at).toLocaleString("id-ID")}
-        >
-          {formatRelative(run.created_at)}
-        </time>
+        <div className="flex items-center gap-2 text-muted-foreground">
+          {(() => {
+            const breakdown = formatLatencyBreakdown(run);
+            return breakdown ? (
+              <>
+                <span
+                  className="hidden tabular-nums sm:inline"
+                  title="Network = waktu dashboard → OpenClaw. LLM = Liana memproses + tools."
+                >
+                  {breakdown}
+                </span>
+                <span aria-hidden className="hidden sm:inline">
+                  •
+                </span>
+              </>
+            ) : null;
+          })()}
+          <time
+            dateTime={run.created_at}
+            title={new Date(run.created_at).toLocaleString("id-ID")}
+          >
+            {formatRelative(run.created_at)}
+          </time>
+        </div>
       </div>
 
       {/* Prompt — always visible */}

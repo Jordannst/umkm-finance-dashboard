@@ -21,6 +21,10 @@ export interface LianaRun {
   status: LianaRunStatus;
   error_message: string | null;
   delivered_at: string | null;
+  /** Saat /api/liana/ask berhasil forward ke OpenClaw. Null untuk row
+   *  yang masih in-flight atau lama (sebelum migration 0009).
+   *  Mirror dari kolom yang sama di lib/finance/liana/runs.ts. */
+  forwarded_at: string | null;
   created_at: string;
 }
 
