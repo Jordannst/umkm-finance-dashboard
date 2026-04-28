@@ -128,6 +128,11 @@ export function useLianaRuns({
       },
       (payload: RealtimePostgresChangesPayload<LianaRun>) => {
         const row = payload.new as LianaRun;
+        console.log("[useLianaRuns] INSERT event:", {
+          id: row.id,
+          run_id: row.run_id,
+          status: row.status,
+        });
         setRuns((prev) => {
           // Skip kalau sudah ada (race kalau initial fetch overlap).
           if (prev.some((r) => r.id === row.id)) return prev;
@@ -146,6 +151,12 @@ export function useLianaRuns({
       },
       (payload: RealtimePostgresChangesPayload<LianaRun>) => {
         const row = payload.new as LianaRun;
+        console.log("[useLianaRuns] UPDATE event:", {
+          id: row.id,
+          run_id: row.run_id,
+          status: row.status,
+          hasReply: !!row.reply_text,
+        });
         setRuns((prev) => {
           const idx = prev.findIndex((r) => r.id === row.id);
           if (idx === -1) {
@@ -160,7 +171,9 @@ export function useLianaRuns({
       },
     );
 
-    channel.subscribe();
+    channel.subscribe((status) => {
+      console.log("[useLianaRuns] channel subscribe status:", status);
+    });
 
     return () => {
       void supabase.removeChannel(channel);
