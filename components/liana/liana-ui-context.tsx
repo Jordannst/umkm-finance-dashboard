@@ -86,7 +86,7 @@ interface LianaUIProviderProps {
  * (yang di-render sekali di layout) bisa baca state.
  */
 export function LianaUIProvider({ userId, children }: LianaUIProviderProps) {
-  const { runs, pendingCount, loading } = useLianaRuns({ userId });
+  const { runs, pendingCount, loading, refetch } = useLianaRuns({ userId });
 
   const [pills, setPills] = React.useState<PillInternal[]>([]);
   const [chatPanelOpen, setChatPanelOpen] = React.useState(false);
@@ -98,6 +98,30 @@ export function LianaUIProvider({ userId, children }: LianaUIProviderProps) {
   React.useEffect(() => {
     runsRef.current = runs;
   }, [runs]);
+
+  // Polling fallback untuk in-flight pills.
+  //
+  // Architecture safety net: pill life-cycle ideally driven by Supabase
+  // Realtime (instant push). Tapi Realtime is inherently fragile —
+  // websocket bisa drop, RLS authorization bisa fail, publication bisa
+  // gak include table. Tanpa fallback, pill bakal stuck forever kalau
+  // Realtime gak deliver UPDATE event.
+  //
+  // Polling kicks in HANYA saat ada pill in-flight (resolvedAt === null).
+  // Begitu semua pill resolved, polling stop — zero overhead saat idle.
+  // Interval 3 detik: balance antara latency feedback vs network cost.
+  const hasInFlightPills = React.useMemo(
+    () => pills.some((p) => p.resolvedAt === null && !p.errorOverride),
+    [pills],
+  );
+
+  React.useEffect(() => {
+    if (!hasInFlightPills) return;
+    const interval = setInterval(() => {
+      void refetch();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [hasInFlightPills, refetch]);
 
   // Single tick interval (1 detik). Tugas:
   //  1. Detect transisi run ke status terminal (done/error) → set resolvedAt.
