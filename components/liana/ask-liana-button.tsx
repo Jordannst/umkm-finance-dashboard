@@ -1,13 +1,14 @@
 "use client";
 
 import * as React from "react";
-import { Bot, Check, Copy, Send } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Bot, Check, Copy, Loader2, Send } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-export type AskLianaMode = "telegram" | "copy" | "auto";
+export type AskLianaMode = "send" | "telegram" | "copy" | "auto";
 
 export interface AskLianaButtonProps {
   /** Prompt yang akan dikirim ke Liana / di-copy. */
@@ -16,11 +17,13 @@ export interface AskLianaButtonProps {
   label?: string;
   /**
    * Mode tombol:
-   * - 'telegram' (preferred): buka https://t.me/<bot>?text=<prompt>
-   *   sehingga user langsung lihat prompt di chat Liana, tinggal pencet Send.
-   * - 'copy': copy prompt ke clipboard, user paste manual.
-   * - 'auto' (default): pakai 'telegram' kalau env
-   *   NEXT_PUBLIC_OPENCLAW_BOT_USERNAME ada, fallback ke 'copy'.
+   * - 'send': POST ke /api/liana/ask, Liana respond langsung di Telegram.
+   *   Perlu NEXT_PUBLIC_LIANA_SEND_ENABLED + Telegram chat_id sudah link.
+   * - 'telegram': buka https://t.me/<bot>?text=<prompt> di tab baru.
+   *   User pencet Send manual.
+   * - 'copy': copy prompt ke clipboard.
+   * - 'auto' (default): preferred 'send' kalau diaktifkan, lalu 'telegram',
+   *   lalu 'copy' sebagai fallback paling kompatibel.
    */
   mode?: AskLianaMode;
   variant?:
@@ -36,13 +39,28 @@ export interface AskLianaButtonProps {
   withIcon?: boolean;
 }
 
+interface AskApiSuccess {
+  ok: true;
+  data: { runId: string };
+}
+interface AskApiError {
+  ok: false;
+  error: { code: string; message: string };
+}
+type AskApiResponse = AskApiSuccess | AskApiError;
+
 /**
- * Tombol "Tanya Liana".
+ * Tombol "Tanya Liana" — 3 mode integrasi.
  *
- * - Mode `telegram` (default kalau bot username di-set): klik tombol membuka
- *   tab baru ke `https://t.me/<bot>?text=<prompt>`. User tinggal pencet Send.
- *   Hilangkan langkah copy-paste sepenuhnya.
- * - Mode `copy`: legacy fallback, copy prompt ke clipboard.
+ * Resolusi mode (saat `mode='auto'`):
+ *   1. 'send'     -> kalau NEXT_PUBLIC_LIANA_SEND_ENABLED truthy.
+ *      POST ke /api/liana/ask, server forward ke OpenClaw /hooks/agent.
+ *      Liana respond di Telegram tanpa user perlu klik Send.
+ *   2. 'telegram' -> kalau NEXT_PUBLIC_OPENCLAW_BOT_USERNAME diset.
+ *      Buka https://t.me/<bot>?text=<prompt> di tab baru. User pencet Send.
+ *   3. 'copy'     -> fallback paling kompatibel. Copy prompt ke clipboard.
+ *
+ * Caller bisa override resolusi auto dengan kasih `mode` eksplisit.
  */
 export function AskLianaButton({
   prompt,
@@ -53,7 +71,9 @@ export function AskLianaButton({
   className,
   withIcon = true,
 }: AskLianaButtonProps) {
+  const router = useRouter();
   const [done, setDone] = React.useState(false);
+  const [pending, setPending] = React.useState(false);
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   React.useEffect(() => {
@@ -62,13 +82,25 @@ export function AskLianaButton({
     };
   }, []);
 
-  // Resolve bot username dari env (only di client). Empty string juga
-  // di-treat sebagai "tidak ada".
+  // Resolve env config (only di client). Empty string juga di-treat
+  // sebagai "tidak ada".
   const botUsername = (
     process.env.NEXT_PUBLIC_OPENCLAW_BOT_USERNAME ?? ""
   ).trim();
-  const resolvedMode: "telegram" | "copy" =
-    mode === "auto" ? (botUsername ? "telegram" : "copy") : mode;
+  const sendEnabled =
+    (process.env.NEXT_PUBLIC_LIANA_SEND_ENABLED ?? "").trim() === "1" ||
+    (process.env.NEXT_PUBLIC_LIANA_SEND_ENABLED ?? "")
+      .trim()
+      .toLowerCase() === "true";
+
+  const resolvedMode: "send" | "telegram" | "copy" =
+    mode === "auto"
+      ? sendEnabled
+        ? "send"
+        : botUsername
+          ? "telegram"
+          : "copy"
+      : mode;
 
   function flashDone() {
     setDone(true);
@@ -133,28 +165,121 @@ export function AskLianaButton({
     flashDone();
   }
 
+  async function handleSend() {
+    if (pending) return;
+    setPending(true);
+    try {
+      const res = await fetch("/api/liana/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+
+      let body: AskApiResponse | null = null;
+      try {
+        body = (await res.json()) as AskApiResponse;
+      } catch {
+        body = null;
+      }
+
+      if (res.ok && body?.ok) {
+        toast.success("Liana sedang menjawab di Telegram", {
+          description: "Buka Telegram untuk lihat balasan Liana.",
+        });
+        flashDone();
+        return;
+      }
+
+      // Error mapping per code
+      const code = body && !body.ok ? body.error?.code : undefined;
+      const message =
+        (body && !body.ok ? body.error?.message : undefined) ??
+        "Gagal menghubungi Liana.";
+
+      if (res.status === 401) {
+        toast.error("Sesi tidak valid", {
+          description: "Silakan login ulang.",
+        });
+        return;
+      }
+
+      if (code === "telegram_not_linked" || res.status === 412) {
+        toast.error("Telegram belum dihubungkan", {
+          description: "Hubungkan akun Telegram di Settings dulu.",
+          action: {
+            label: "Buka Settings",
+            onClick: () => router.push("/settings"),
+          },
+        });
+        return;
+      }
+
+      if (res.status === 429) {
+        const retry = res.headers.get("Retry-After");
+        toast.error("Liana sedang sibuk", {
+          description: retry
+            ? `Coba lagi dalam ${retry} detik.`
+            : "Coba lagi sebentar.",
+        });
+        return;
+      }
+
+      if (code === "not_configured" || res.status === 503) {
+        toast.error("Integrasi Liana belum aktif", {
+          description: "Mode send butuh konfigurasi server. Coba copy prompt.",
+        });
+        // Fallback otomatis ke clipboard supaya user tetap bisa lanjut
+        void handleCopy();
+        return;
+      }
+
+      console.error("[AskLianaButton] /api/liana/ask error:", res.status, body);
+      toast.error("Gagal mengirim ke Liana", { description: message });
+    } catch (err) {
+      console.error("[AskLianaButton] network error:", err);
+      toast.error("Gagal menghubungi Liana", {
+        description: "Cek koneksi internet, lalu coba lagi.",
+      });
+    } finally {
+      setPending(false);
+    }
+  }
+
   const onClick =
-    resolvedMode === "telegram" ? handleTelegramOpen : handleCopy;
+    resolvedMode === "send"
+      ? handleSend
+      : resolvedMode === "telegram"
+        ? handleTelegramOpen
+        : handleCopy;
 
   // Icon pilih sesuai state + mode.
+  // - pending -> Loader2 (mode 'send' saja, fetching API)
   // - done    -> Check (semua mode)
-  // - telegram -> Send (icon paper plane, sesuai aksi "kirim")
+  // - send / telegram -> Send (paper plane, aksi "kirim")
   // - copy + withIcon -> Bot (branded Liana)
   // - copy tanpa withIcon -> Copy (utility ikon)
-  const ActiveIcon = done
-    ? Check
-    : resolvedMode === "telegram"
-      ? Send
-      : withIcon
-        ? Bot
-        : Copy;
+  const ActiveIcon = pending
+    ? Loader2
+    : done
+      ? Check
+      : resolvedMode === "send" || resolvedMode === "telegram"
+        ? Send
+        : withIcon
+          ? Bot
+          : Copy;
 
   const doneLabel =
-    resolvedMode === "telegram" ? "Telegram dibuka!" : "Disalin!";
+    resolvedMode === "send"
+      ? "Terkirim!"
+      : resolvedMode === "telegram"
+        ? "Telegram dibuka!"
+        : "Disalin!";
   const ariaLabel =
-    resolvedMode === "telegram"
-      ? `Kirim ke Liana di Telegram: ${label}`
-      : `Salin prompt: ${label}`;
+    resolvedMode === "send"
+      ? `Kirim ke Liana: ${label}`
+      : resolvedMode === "telegram"
+        ? `Kirim ke Liana di Telegram: ${label}`
+        : `Salin prompt: ${label}`;
 
   return (
     <Button
@@ -162,6 +287,7 @@ export function AskLianaButton({
       variant={variant}
       size={size}
       onClick={onClick}
+      disabled={pending}
       className={cn(
         "gap-1.5",
         done && "border-success text-success",
@@ -170,7 +296,11 @@ export function AskLianaButton({
       aria-label={ariaLabel}
     >
       <ActiveIcon
-        className={cn("h-3.5 w-3.5", !done && withIcon && "text-primary")}
+        className={cn(
+          "h-3.5 w-3.5",
+          pending && "animate-spin",
+          !done && !pending && withIcon && "text-primary",
+        )}
         aria-hidden
       />
       <span>{done ? doneLabel : label}</span>
