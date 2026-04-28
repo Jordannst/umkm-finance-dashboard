@@ -15,6 +15,9 @@ export type PillStatus = "sending" | "thinking" | "done" | "error";
 export interface PillView {
   /** Stable client-side ID (UUID) — survives even sebelum runId diketahui. */
   clientId: string;
+  /** Saat pill di-add (Date.now() ms). Dipakai pill component buat
+   *  compute elapsed time → cycling phase labels saat status='thinking'. */
+  createdAt: number;
   /** Truncated prompt untuk display (max ~80 char). */
   promptPreview: string;
   /** Server-side run ID, set setelah `/api/liana/ask` sukses. */
@@ -28,6 +31,9 @@ interface PillInternal {
   clientId: string;
   prompt: string;
   runId: string | null;
+  /** Saat pill di-add (Date.now() ms). Dipakai untuk compute elapsed time
+   *  driving cycling phase labels saat status='thinking'. */
+  createdAt: number;
   /** Saat pill pertama kali masuk state terminal (done/error) — buat
    *  hitung auto-dismiss timeout. Hover akan PAUSE timer (lihat tick effect).
    *  Di-set lazily oleh tick interval saat run pill transition ke done/error. */
@@ -181,6 +187,7 @@ export function LianaUIProvider({ userId, children }: LianaUIProviderProps) {
         clientId,
         prompt,
         runId: null,
+        createdAt: Date.now(),
         resolvedAt: null,
         errorOverride: null,
         hovered: false,
@@ -240,6 +247,7 @@ export function LianaUIProvider({ userId, children }: LianaUIProviderProps) {
         const errorMessage = deriveErrorMessage(p, runs);
         return {
           clientId: p.clientId,
+          createdAt: p.createdAt,
           promptPreview: previewPrompt(p.prompt),
           runId: p.runId,
           status,
