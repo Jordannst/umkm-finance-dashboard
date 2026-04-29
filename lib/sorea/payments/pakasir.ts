@@ -130,17 +130,22 @@ export async function createPakasirTransaction(
     };
   }
 
-  const url = `${cfg.apiUrl.replace(/\/+$/, "")}/api/transactioncreate`;
+  // Pakasir API: POST {apiUrl}/api/transactioncreate/{method}
+  // Untuk QRIS, method = "qris". Body cuma {project, order_id, amount, api_key}.
+  // Webhook + redirect URL di-config dari dashboard Pakasir, bukan per-request.
+  const url = `${cfg.apiUrl.replace(/\/+$/, "")}/api/transactioncreate/qris`;
 
   const body = {
     project: cfg.projectId,
     amount: params.amount,
     order_id: params.orderId,
     api_key: cfg.apiKey,
-    is_qris_only: 1,
-    redirect_url: params.redirectUrl,
-    callback_url: params.callbackUrl,
   };
+  // params.callbackUrl & params.redirectUrl tidak dipakai di payload (Pakasir
+  // ambil dari project config), tapi tetap di-accept di interface untuk
+  // forward-compat. Suppress unused-var warning.
+  void params.callbackUrl;
+  void params.redirectUrl;
 
   let res: Response;
   try {
@@ -183,8 +188,11 @@ export async function createPakasirTransaction(
     };
   }
 
-  // Pakasir kadang nest payload di .data, kadang flat.
-  const response = unwrapPayload<PakasirCreateResponse>(raw);
+  // Pakasir bungkus response create dengan key "payment".
+  const response = unwrapPayload<PakasirCreateResponse>(raw, [
+    "payment",
+    "data",
+  ]);
 
   // Validasi minimal: harus ada payment_number (untuk render QR).
   if (!response.payment_number && !response.payment_url) {
@@ -290,7 +298,11 @@ export async function getPakasirTransactionDetail(params: {
     };
   }
 
-  const detail = unwrapPayload<PakasirWebhookPayload>(raw);
+  // Pakasir bungkus response detail dengan key "transaction".
+  const detail = unwrapPayload<PakasirWebhookPayload>(raw, [
+    "transaction",
+    "data",
+  ]);
   return { ok: true, detail, raw };
 }
 
@@ -312,18 +324,26 @@ async function safeReadJson(res: Response): Promise<unknown> {
 }
 
 /**
- * Pakasir kadang return `{ status: ..., data: { ...actualPayload } }`,
- * kadang flat. Helper ini ambil .data kalau ada object, else return body.
+ * Pakasir bungkus payload dengan key yang berbeda per endpoint:
+ *   - transactioncreate/qris  -> { payment: {...} }
+ *   - transactiondetail        -> { transaction: {...} }
+ *   - (generic / future)       -> { data: {...} }
+ *
+ * Helper ini coba unwrap berdasarkan key yang dispesifikasikan caller,
+ * fallback ke body flat kalau gak ada wrapper.
  */
-function unwrapPayload<T extends object>(body: unknown): T {
-  if (
-    body &&
-    typeof body === "object" &&
-    "data" in body &&
-    typeof (body as { data: unknown }).data === "object" &&
-    (body as { data: unknown }).data !== null
-  ) {
-    return (body as { data: T }).data;
+function unwrapPayload<T extends object>(
+  body: unknown,
+  keys: readonly string[] = ["data"],
+): T {
+  if (body && typeof body === "object") {
+    const obj = body as Record<string, unknown>;
+    for (const key of keys) {
+      const inner = obj[key];
+      if (inner && typeof inner === "object") {
+        return inner as T;
+      }
+    }
   }
   return (body ?? {}) as T;
 }

@@ -123,10 +123,16 @@ export async function generateQrisForOrder(params: {
   const pkResp = pakasirResult.response;
   const emv = pkResp.payment_number ?? "";
   const expiredAt = pkResp.expired_at ?? null;
+  const fee = typeof pkResp.fee === "number" ? pkResp.fee : null;
+  const totalPayment =
+    typeof pkResp.total_payment === "number" ? pkResp.total_payment : null;
+  // Pakasir tidak return transaction_id terpisah; pakai order_id sebagai
+  // reference (dia memang pakai (project, order_id, amount) sebagai
+  // composite key di backend mereka).
   const pakasirReference =
     typeof pkResp.transaction_id === "string"
       ? pkResp.transaction_id
-      : null;
+      : (pkResp.order_id as string | undefined) ?? order.order_code;
 
   // 4. Render QR ke data URL (server-side, hemat client bundle).
   let qrDataUrl = "";
@@ -184,6 +190,8 @@ export async function generateQrisForOrder(params: {
       emv,
       expiredAt,
       amount: order.payment_amount,
+      fee,
+      totalPayment,
       pakasirReference,
     },
     order: (updatedRow as Order) ?? order,

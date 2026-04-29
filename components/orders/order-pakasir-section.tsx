@@ -212,10 +212,22 @@ export function OrderPakasirSection({
                 QR tidak ter-render
               </div>
             )}
-            <div className="text-center">
-              <p className="font-mono text-base font-bold tabular-nums">
-                {formatRupiah(display.amount)}
-              </p>
+            <div className="text-center space-y-1">
+              {display.totalPayment !== null && display.totalPayment > display.amount ? (
+                <>
+                  <p className="font-mono text-base font-bold tabular-nums">
+                    {formatRupiah(display.totalPayment)}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground tabular-nums">
+                    {formatRupiah(display.amount)} + fee{" "}
+                    {formatRupiah(display.fee ?? 0)}
+                  </p>
+                </>
+              ) : (
+                <p className="font-mono text-base font-bold tabular-nums">
+                  {formatRupiah(display.amount)}
+                </p>
+              )}
               {display.expiredAt && (
                 <p className="text-xs text-muted-foreground">
                   Berlaku sampai {formatExpiry(display.expiredAt)}

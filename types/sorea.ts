@@ -180,7 +180,7 @@ export interface PakasirCreateResponse {
   payment_number?: string;
   /** Payment URL (kalau Pakasir return; biasanya untuk redirect non-QRIS) */
   payment_url?: string;
-  /** ID transaksi di sisi Pakasir */
+  /** ID transaksi di sisi Pakasir (jarang ada di Pakasir, biasanya pakai order_id) */
   transaction_id?: string;
   /** ISO timestamp expired QRIS (biasanya 5-15 menit) */
   expired_at?: string;
@@ -188,6 +188,12 @@ export interface PakasirCreateResponse {
   status?: string;
   /** Nominal yang di-charge (echo dari request) */
   amount?: number;
+  /** Fee yang di-charge Pakasir (di-tambahkan ke amount untuk total payable) */
+  fee?: number;
+  /** Total payable yang harus customer bayar (amount + fee) */
+  total_payment?: number;
+  /** Method pembayaran (mis. "qris") */
+  payment_method?: string;
   /** Project ID echo */
   project?: string;
   /** Order ID echo */
@@ -227,8 +233,12 @@ export interface QrisDisplayPayload {
   emv: string;
   /** ISO expired_at dari Pakasir */
   expiredAt: string | null;
-  /** Nominal demo yang di-charge */
+  /** Nominal demo yang di-charge (echo amount kita request) */
   amount: number;
+  /** Fee Pakasir (kalau ada) */
+  fee: number | null;
+  /** Total payable customer (amount + fee). Null kalau Pakasir gak return. */
+  totalPayment: number | null;
   /** Reference dari Pakasir (kalau ada) */
   pakasirReference: string | null;
 }
