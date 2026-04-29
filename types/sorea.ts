@@ -161,3 +161,74 @@ export const FULFILLMENT_METHOD_OPTIONS = [
   "Ambil di tempat",
   "Antar",
 ] as const;
+
+// ============================================================
+// Phase 3 — Pakasir Payment
+// ============================================================
+
+/**
+ * Subset response Pakasir create-transaction yang kita pakai. Pakasir
+ * mungkin return field lain (payment_method, redirect_url, dst); kita
+ * sengaja hanya tipe-kan yang dipakai supaya lebih resilient terhadap
+ * perubahan minor di sisi Pakasir.
+ *
+ * Field naming mengikuti hint dari user spec: payment_number adalah
+ * EMVCo string yang akan di-render jadi QR code.
+ */
+export interface PakasirCreateResponse {
+  /** EMVCo QRIS string yang akan di-render jadi QR code */
+  payment_number?: string;
+  /** Payment URL (kalau Pakasir return; biasanya untuk redirect non-QRIS) */
+  payment_url?: string;
+  /** ID transaksi di sisi Pakasir */
+  transaction_id?: string;
+  /** ISO timestamp expired QRIS (biasanya 5-15 menit) */
+  expired_at?: string;
+  /** Status awal, biasanya "pending" atau "created" */
+  status?: string;
+  /** Nominal yang di-charge (echo dari request) */
+  amount?: number;
+  /** Project ID echo */
+  project?: string;
+  /** Order ID echo */
+  order_id?: string;
+  /** Allow forward-compat */
+  [key: string]: unknown;
+}
+
+/**
+ * Webhook payload dari Pakasir saat customer selesai bayar.
+ *
+ * Kita verify isinya sebelum trust:
+ * - amount cocok payment_amount order
+ * - project cocok PAKASIR_PROJECT_ID
+ * - order_id cocok order.order_code
+ * - status === "completed"
+ * - PLUS re-fetch via /api/transactiondetail untuk confirm completed
+ */
+export interface PakasirWebhookPayload {
+  amount?: number;
+  order_id?: string;
+  project?: string;
+  status?: string;
+  payment_method?: string;
+  completed_at?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Snapshot info QRIS yang siap untuk render UI. Disusun dari response
+ * Pakasir create-transaction + tambahan data internal kita.
+ */
+export interface QrisDisplayPayload {
+  /** Data URL gambar QR (server-rendered) */
+  qrDataUrl: string;
+  /** EMVCo string raw, untuk debug atau alternative renderer */
+  emv: string;
+  /** ISO expired_at dari Pakasir */
+  expiredAt: string | null;
+  /** Nominal demo yang di-charge */
+  amount: number;
+  /** Reference dari Pakasir (kalau ada) */
+  pakasirReference: string | null;
+}

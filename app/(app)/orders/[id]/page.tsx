@@ -7,6 +7,7 @@ import {
   OrderStatusBadge,
   PaymentStatusBadge,
 } from "@/components/orders/order-status-badge";
+import { OrderPakasirSection } from "@/components/orders/order-pakasir-section";
 import { OrderStatusActions } from "@/components/orders/order-status-actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -21,6 +22,7 @@ import {
 import { getCurrentBusinessId } from "@/lib/finance/business";
 import { formatRupiah } from "@/lib/finance/format";
 import { getOrderWithItems } from "@/lib/sorea/orders/queries";
+import { isPakasirConfigured } from "@/lib/sorea/payments/pakasir";
 
 interface OrderDetailPageProps {
   params: Promise<{ id: string }>;
@@ -47,6 +49,14 @@ export default async function OrderDetailPage(props: OrderDetailPageProps) {
   if (!order) {
     notFound();
   }
+
+  // Phase 3: feature flags untuk Pakasir section.
+  const pakasirConfigured = isPakasirConfigured();
+  // Tombol simulate cuma muncul di non-prod, atau prod kalau env explicit
+  // ALLOW_PAKASIR_SIMULATE=1 (api route juga gate yang sama).
+  const showSimulate =
+    process.env.NODE_ENV !== "production" ||
+    process.env.ALLOW_PAKASIR_SIMULATE === "1";
 
   return (
     <div className="space-y-6">
@@ -185,31 +195,29 @@ export default async function OrderDetailPage(props: OrderDetailPageProps) {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Pembayaran</CardTitle>
+              <CardTitle className="text-base">Pembayaran QRIS</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <InfoRow
-                label="Total order"
-                value={formatRupiah(order.order_total_amount)}
+            <CardContent className="space-y-3">
+              <OrderPakasirSection
+                orderId={order.id}
+                paymentStatus={order.payment_status}
+                orderTotal={order.order_total_amount}
+                paymentAmount={order.payment_amount}
+                showSimulate={showSimulate}
+                pakasirConfigured={pakasirConfigured}
               />
-              <InfoRow
-                label="Nominal bayar"
-                value={
-                  order.payment_amount === 1
-                    ? `${formatRupiah(order.payment_amount)} (demo)`
-                    : formatRupiah(order.payment_amount)
-                }
-              />
-              {order.payment_provider && (
-                <InfoRow label="Provider" value={order.payment_provider} />
-              )}
-              {order.payment_reference && (
-                <InfoRow label="Ref" value={order.payment_reference} />
-              )}
-              {!order.payment_provider && (
-                <p className="text-xs italic text-muted-foreground">
-                  Payment gateway aktif di Phase 3.
-                </p>
+              {(order.payment_provider || order.payment_reference) && (
+                <div className="space-y-1.5 border-t pt-3 text-sm">
+                  {order.payment_provider && (
+                    <InfoRow
+                      label="Provider"
+                      value={order.payment_provider}
+                    />
+                  )}
+                  {order.payment_reference && (
+                    <InfoRow label="Ref" value={order.payment_reference} />
+                  )}
+                </div>
               )}
             </CardContent>
           </Card>
