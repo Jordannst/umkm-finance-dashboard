@@ -59,7 +59,16 @@ function formatRupiah(n) {
   return "Rp" + n.toLocaleString("id-ID");
 }
 
-async function callApi(method, path, body) {
+/**
+ * Random 6-char base36 ID untuk correlate multiple log lines yang
+ * belong ke single tool invocation. Cukup untuk personal usage — collision
+ * probability hampir nol di throughput rendah.
+ */
+function mkRid() {
+  return Math.random().toString(36).slice(2, 8);
+}
+
+async function callApi(method, path, body, ctx) {
   const url = `${DASHBOARD_URL}${path}`;
   const headers = {
     "Content-Type": "application/json",
@@ -67,6 +76,13 @@ async function callApi(method, path, body) {
   // Healthcheck tidak butuh auth
   if (path !== "/api/liana/health") {
     headers["Authorization"] = `Bearer ${LIANA_SHARED_SECRET}`;
+  }
+
+  const apiStart = Date.now();
+  if (ctx) {
+    console.error(
+      `[mcp] tool=${ctx.tool} rid=${ctx.rid} api_call=${method} ${path} start`,
+    );
   }
 
   let response;
@@ -77,6 +93,11 @@ async function callApi(method, path, body) {
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch (err) {
+    if (ctx) {
+      console.error(
+        `[mcp] tool=${ctx.tool} rid=${ctx.rid} api_call=${method} ${path} duration_ms=${Date.now() - apiStart} status=network_error`,
+      );
+    }
     return {
       ok: false,
       error: {
@@ -90,6 +111,11 @@ async function callApi(method, path, body) {
   try {
     payload = await response.json();
   } catch {
+    if (ctx) {
+      console.error(
+        `[mcp] tool=${ctx.tool} rid=${ctx.rid} api_call=${method} ${path} duration_ms=${Date.now() - apiStart} status=invalid_response http=${response.status}`,
+      );
+    }
     return {
       ok: false,
       error: {
@@ -97,6 +123,12 @@ async function callApi(method, path, body) {
         message: `Server balas non-JSON (HTTP ${response.status}).`,
       },
     };
+  }
+
+  if (ctx) {
+    console.error(
+      `[mcp] tool=${ctx.tool} rid=${ctx.rid} api_call=${method} ${path} duration_ms=${Date.now() - apiStart} status=${payload.ok ? "ok" : "error"} http=${response.status}`,
+    );
   }
   return payload;
 }
@@ -159,18 +191,30 @@ server.tool(
       ),
   },
   async (args) => {
-    const result = await callApi("POST", "/api/liana/finance-input", {
-      business_id: BUSINESS_ID,
-      type: args.type,
-      amount: args.amount,
-      category_name: args.category_name ?? null,
-      note: args.note ?? null,
-      transaction_date: args.transaction_date,
-      source: "chat",
-      created_by: "Liana",
-    });
+    const ctx = { tool: "umkm_catat_pemasukan_pengeluaran", rid: mkRid() };
+    const start = Date.now();
+    console.error(`[mcp] tool=${ctx.tool} rid=${ctx.rid} start`);
+
+    const result = await callApi(
+      "POST",
+      "/api/liana/finance-input",
+      {
+        business_id: BUSINESS_ID,
+        type: args.type,
+        amount: args.amount,
+        category_name: args.category_name ?? null,
+        note: args.note ?? null,
+        transaction_date: args.transaction_date,
+        source: "chat",
+        created_by: "Liana",
+      },
+      ctx,
+    );
 
     if (!result.ok) {
+      console.error(
+        `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=error code=${result.error?.code ?? "unknown"}`,
+      );
       return asError(
         `${result.error?.code ?? "unknown"}: ${result.error?.message ?? "tidak diketahui"}`,
       );
@@ -178,6 +222,9 @@ server.tool(
 
     const tx = result.data?.transaction;
     const verb = args.type === "income" ? "Pemasukan" : "Pengeluaran";
+    console.error(
+      `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=ok`,
+    );
     return asText(
       `${verb} ${formatRupiah(args.amount)} berhasil dicatat (id: ${tx?.id}). ` +
         `Tanggal: ${tx?.transaction_date}. ` +
@@ -222,17 +269,29 @@ server.tool(
       ),
   },
   async (args) => {
-    const result = await callApi("POST", "/api/liana/receivable-input", {
-      business_id: BUSINESS_ID,
-      customer_name: args.customer_name,
-      amount: args.amount,
-      category_name: args.category_name ?? null,
-      note: args.note ?? null,
-      due_date: args.due_date ?? null,
-      source: "chat",
-    });
+    const ctx = { tool: "umkm_catat_piutang_baru", rid: mkRid() };
+    const start = Date.now();
+    console.error(`[mcp] tool=${ctx.tool} rid=${ctx.rid} start`);
+
+    const result = await callApi(
+      "POST",
+      "/api/liana/receivable-input",
+      {
+        business_id: BUSINESS_ID,
+        customer_name: args.customer_name,
+        amount: args.amount,
+        category_name: args.category_name ?? null,
+        note: args.note ?? null,
+        due_date: args.due_date ?? null,
+        source: "chat",
+      },
+      ctx,
+    );
 
     if (!result.ok) {
+      console.error(
+        `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=error code=${result.error?.code ?? "unknown"}`,
+      );
       return asError(
         `${result.error?.code ?? "unknown"}: ${result.error?.message ?? "tidak diketahui"}`,
       );
@@ -242,6 +301,9 @@ server.tool(
     const dueText = rc?.due_date
       ? `Jatuh tempo: ${rc.due_date}.`
       : "Tanpa tanggal jatuh tempo.";
+    console.error(
+      `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=ok`,
+    );
     return asText(
       `Piutang ${args.customer_name} sebesar ${formatRupiah(args.amount)} dicatat (id: ${rc?.id}). ` +
         `${dueText} Status: belum bayar (unpaid).`,
@@ -292,27 +354,42 @@ server.tool(
       .describe("Catatan, mis. 'transfer BCA', 'tunai'."),
   },
   async (args) => {
+    const ctx = { tool: "umkm_catat_pembayaran_piutang", rid: mkRid() };
+    const start = Date.now();
+    console.error(`[mcp] tool=${ctx.tool} rid=${ctx.rid} start`);
+
     if (!args.customer_name && !args.receivable_id) {
+      console.error(
+        `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=error code=missing_target`,
+      );
       return asError(
         "Harus mengisi salah satu: customer_name atau receivable_id.",
       );
     }
 
-    const result = await callApi("POST", "/api/liana/receivable-payment", {
-      business_id: BUSINESS_ID,
-      customer_name: args.customer_name ?? null,
-      receivable_id: args.receivable_id ?? null,
-      amount: args.amount,
-      payment_date: args.payment_date,
-      note: args.note ?? null,
-      source: "chat",
-      created_by: "Liana",
-    });
+    const result = await callApi(
+      "POST",
+      "/api/liana/receivable-payment",
+      {
+        business_id: BUSINESS_ID,
+        customer_name: args.customer_name ?? null,
+        receivable_id: args.receivable_id ?? null,
+        amount: args.amount,
+        payment_date: args.payment_date,
+        note: args.note ?? null,
+        source: "chat",
+        created_by: "Liana",
+      },
+      ctx,
+    );
 
     if (!result.ok) {
       // Translate code yang penting jadi pesan natural
       const code = result.error?.code;
       const msg = result.error?.message ?? "";
+      console.error(
+        `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=error code=${code ?? "unknown"}`,
+      );
       if (code === "amount_exceeds_remaining") {
         return asError(
           `Jumlah pembayaran ${formatRupiah(args.amount)} melebihi sisa piutang. ${msg}`,
@@ -337,6 +414,9 @@ server.tool(
       : sisa !== null
         ? `Sisa: ${formatRupiah(sisa)}.`
         : "";
+    console.error(
+      `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=ok`,
+    );
     return asText(
       `Pembayaran ${formatRupiah(args.amount)} dari ${rc?.customer_name ?? "pelanggan"} berhasil dicatat. ${tail}`,
     );
@@ -361,6 +441,10 @@ server.tool(
       ),
   },
   async (args) => {
+    const ctx = { tool: "umkm_ambil_rekap", rid: mkRid() };
+    const start = Date.now();
+    console.error(`[mcp] tool=${ctx.tool} rid=${ctx.rid} start`);
+
     const period = args.period ?? "today";
     const qs = new URLSearchParams({
       business_id: BUSINESS_ID,
@@ -369,9 +453,14 @@ server.tool(
     const result = await callApi(
       "GET",
       `/api/liana/recap?${qs.toString()}`,
+      null,
+      ctx,
     );
 
     if (!result.ok) {
+      console.error(
+        `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=error code=${result.error?.code ?? "unknown"}`,
+      );
       return asError(
         `${result.error?.code ?? "unknown"}: ${result.error?.message ?? "tidak diketahui"}`,
       );
@@ -415,6 +504,9 @@ server.tool(
       }
     }
 
+    console.error(
+      `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=ok`,
+    );
     return asText(lines.join("\n"));
   },
 );
