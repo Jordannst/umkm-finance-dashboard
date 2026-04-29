@@ -2,12 +2,13 @@
 /**
  * MCP Server untuk Dashboard Keuangan UMKM.
  *
- * Dipakai oleh OpenClaw (Liana) untuk menambah 5 skill keuangan UMKM:
+ * Dipakai oleh OpenClaw (Liana) untuk menambah 6 skill keuangan UMKM:
  *  1. umkm_catat_pemasukan_pengeluaran
  *  2. umkm_catat_piutang_baru
  *  3. umkm_catat_pembayaran_piutang
  *  4. umkm_ambil_rekap
  *  5. umkm_health_check
+ *  6. umkm_notify_dashboard (callback ke dashboard setelah Liana balas)
  *
  * Cara register di OpenClaw:
  *
@@ -16,7 +17,8 @@
  *     --args "/abs/path/to/liana-mcp/server.mjs" \
  *     --env DASHBOARD_URL=https://your-app.vercel.app \
  *     --env LIANA_SHARED_SECRET=your-secret \
- *     --env BUSINESS_ID=11111111-1111-4111-8111-111111111111
+ *     --env BUSINESS_ID=11111111-1111-4111-8111-111111111111 \
+ *     --env OPENCLAW_HOOK_TOKEN=your-callback-token
  *
  * Lihat README.md di folder ini untuk panduan lengkap.
  */
@@ -34,6 +36,10 @@ const DASHBOARD_URL = (
 ).replace(/\/$/, "");
 const LIANA_SHARED_SECRET = process.env.LIANA_SHARED_SECRET ?? "";
 const BUSINESS_ID = process.env.BUSINESS_ID ?? "";
+// Token untuk callback ke /api/liana/run-callback. Optional — kalau tidak
+// diset, tool umkm_notify_dashboard akan return error. Telegram-only flows
+// (tanpa dashboard origin) tidak butuh ini.
+const OPENCLAW_HOOK_TOKEN = process.env.OPENCLAW_HOOK_TOKEN ?? "";
 
 if (!LIANA_SHARED_SECRET) {
   console.error(
@@ -530,6 +536,139 @@ server.tool(
     return asText(
       `OK. Service: ${d.service}, version: ${d.version}, ` +
         `server time: ${d.server_time}. URL: ${DASHBOARD_URL}.`,
+    );
+  },
+);
+
+// ---------------------------------------------------------------------
+// Tool 6: Notify dashboard run done
+// ---------------------------------------------------------------------
+//
+// Kontekst: Dashboard chat panel kirim prompt ke Liana via OpenClaw hooks.
+// Awalnya OpenClaw hook-callback yang notify dashboard saat reply terkirim,
+// tapi fitur itu sempat bermasalah (callback tidak fire setelah upgrade
+// gateway 2026.4.25 -> 2026.4.26).
+//
+// Sebagai gantinya, Liana sendiri yang panggil tool ini SETELAH balas user.
+// Tool ini POST ke /api/liana/run-callback dengan bearer token, lalu dashboard
+// update row liana_runs (status=done, delivered_at populated, reply_text
+// disimpan). Realtime push akan refresh chat panel ke status "done".
+//
+// Trigger: Liana baca tag [dashboard_run_id=<UUID>] di prompt user.
+// Kalau tag ada → panggil tool ini SETELAH jawab user.
+// Kalau tag tidak ada → SKIP tool ini (prompt asal Telegram, bukan dashboard).
+server.tool(
+  "umkm_notify_dashboard",
+  "WAJIB dipanggil ketika prompt user mengandung tag [dashboard_run_id=<UUID>] " +
+    "(artinya pesan asal dari dashboard, bukan Telegram langsung). Tool ini update " +
+    "status pesan di dashboard supaya pill 'thinking' berubah jadi 'done' dan reply " +
+    "muncul di chat panel. Panggil SETELAH lo selesai balas user di Telegram. " +
+    "JANGAN panggil kalau prompt TIDAK punya tag tersebut.",
+  {
+    dashboard_run_id: z
+      .string()
+      .uuid()
+      .describe(
+        "UUID yang muncul di tag [dashboard_run_id=<UUID>] di awal prompt user. " +
+          "Copy persis dari prompt, jangan diubah atau direka-reka.",
+      ),
+    reply_text: z
+      .string()
+      .min(1)
+      .max(8000)
+      .describe(
+        "Reply yang lo kirim ke user. Boleh sama persis dengan jawaban Telegram, " +
+          "atau ringkasan singkat (≤ 8000 char). Akan ditampilkan di dashboard chat panel.",
+      ),
+  },
+  async (args) => {
+    const ctx = { tool: "umkm_notify_dashboard", rid: mkRid() };
+    const start = Date.now();
+    console.error(
+      `[mcp] tool=${ctx.tool} rid=${ctx.rid} start dashboard_run_id=${args.dashboard_run_id}`,
+    );
+
+    if (!OPENCLAW_HOOK_TOKEN) {
+      console.error(
+        `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=error code=token_missing`,
+      );
+      return asError(
+        "OPENCLAW_HOOK_TOKEN tidak diset di env MCP server. Tambahkan via " +
+          "`openclaw mcp set umkm-finance --env OPENCLAW_HOOK_TOKEN=<token>` " +
+          "lalu restart gateway.",
+      );
+    }
+
+    const url = `${DASHBOARD_URL}/api/liana/run-callback`;
+    const apiStart = Date.now();
+    console.error(
+      `[mcp] tool=${ctx.tool} rid=${ctx.rid} api_call=POST /api/liana/run-callback start`,
+    );
+
+    let response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${OPENCLAW_HOOK_TOKEN}`,
+        },
+        body: JSON.stringify({
+          status: "done",
+          replyText: args.reply_text,
+          replyFormat: "plain",
+          deliveredAt: new Date().toISOString(),
+          metadata: {
+            dashboardRunId: args.dashboard_run_id,
+          },
+        }),
+      });
+    } catch (err) {
+      console.error(
+        `[mcp] tool=${ctx.tool} rid=${ctx.rid} api_call=POST /api/liana/run-callback duration_ms=${Date.now() - apiStart} status=network_error`,
+      );
+      console.error(
+        `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=error code=network_error`,
+      );
+      return asError(
+        `Gagal connect ke dashboard di ${DASHBOARD_URL}: ${err?.message ?? err}`,
+      );
+    }
+
+    let payload;
+    try {
+      payload = await response.json();
+    } catch {
+      console.error(
+        `[mcp] tool=${ctx.tool} rid=${ctx.rid} api_call=POST /api/liana/run-callback duration_ms=${Date.now() - apiStart} http=${response.status} status=invalid_response`,
+      );
+      console.error(
+        `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=error code=invalid_response`,
+      );
+      return asError(`Server balas non-JSON (HTTP ${response.status}).`);
+    }
+
+    console.error(
+      `[mcp] tool=${ctx.tool} rid=${ctx.rid} api_call=POST /api/liana/run-callback duration_ms=${Date.now() - apiStart} http=${response.status} status=${payload.ok ? "ok" : "error"}`,
+    );
+
+    if (!payload.ok) {
+      console.error(
+        `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=error code=${payload.error?.code ?? "unknown"}`,
+      );
+      return asError(
+        `${payload.error?.code ?? "unknown"}: ${payload.error?.message ?? "tidak diketahui"}`,
+      );
+    }
+
+    const matched = payload.data?.matched === true;
+    console.error(
+      `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=ok matched=${matched}`,
+    );
+    return asText(
+      matched
+        ? "Dashboard ter-update: status=done, reply_text disimpan. Pill di chat panel akan switch ke 'done'."
+        : `Notifikasi terkirim, tapi dashboard_run_id ${args.dashboard_run_id} tidak ditemukan di database. Cek apakah UUID di tag sesuai dengan prompt user.`,
     );
   },
 );

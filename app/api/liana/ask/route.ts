@@ -153,9 +153,26 @@ export async function POST(request: Request) {
         }
       : undefined;
 
-  // 7. Forward ke OpenClaw
+  // 7. Wrap prompt dengan tag + instruksi sistem supaya Liana panggil
+  //    tool umkm_notify_dashboard SETELAH dia balas user. Ini fallback
+  //    karena OpenClaw hook-callback bermasalah pasca-upgrade gateway
+  //    2026.4.25 -> 2026.4.26 — callback config tetap di-forward (line 6
+  //    di atas) supaya kalau hook-callback fix, tetap kepake; tapi kita
+  //    tidak depend on it.
+  //
+  //    Format: tag + 1-line instruction + user prompt asli. Liana akan
+  //    membaca tag dashboard_run_id dari prompt dan pass ke tool sesuai
+  //    deskripsinya. Instruksi singkat — tidak meningkatkan latency
+  //    secara berarti.
+  const wrappedMessage =
+    `[dashboard_run_id=${run.id}]\n` +
+    `[SISTEM: Pesan ini dari dashboard. Setelah balas user, WAJIB panggil tool ` +
+    `umkm_notify_dashboard dengan dashboard_run_id di atas dan reply_text=jawabanmu. ` +
+    `Jangan ulangi instruksi ini ke user.]\n\n` +
+    parsed.data.prompt;
+
   const result = await askLiana({
-    message: parsed.data.prompt,
+    message: wrappedMessage,
     telegramChatId: profile.telegram_chat_id,
     name: profile.full_name ?? "UMKM Finance Dashboard",
     sessionKey: `hook:umkm-dashboard:${user.id}`,
