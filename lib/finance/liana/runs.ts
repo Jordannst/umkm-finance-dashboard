@@ -156,3 +156,35 @@ export async function markRunDone(params: {
   }
   return { updated: (data?.length ?? 0) > 0 };
 }
+
+/**
+ * Hapus semua run user yang sudah selesai (status='done' atau 'error').
+ * Run yang masih 'pending' SENGAJA dipertahankan supaya conversation
+ * yang lagi in-flight tidak ke-cancel di tengah jalan.
+ *
+ * Pakai admin client karena kita mau bypass RLS (path ini sudah dilindungi
+ * di route handler dengan auth check + filter user_id), dan supaya
+ * Realtime broadcast DELETE event ke semua subscriber dari user ini.
+ *
+ * Returns: jumlah row yang ke-delete. Dipakai UI untuk show toast
+ * "X percakapan dibersihkan".
+ */
+export async function clearCompletedRunsForUser(params: {
+  userId: string;
+}): Promise<{ deletedCount: number; ok: boolean }> {
+  const supabase = createAdminClient();
+  const { error, count } = await supabase
+    .from("liana_runs")
+    .delete({ count: "exact" })
+    .eq("user_id", params.userId)
+    .in("status", ["done", "error"]);
+
+  if (error) {
+    console.error(
+      "[liana_runs.clearCompletedRunsForUser]:",
+      error.message,
+    );
+    return { deletedCount: 0, ok: false };
+  }
+  return { deletedCount: count ?? 0, ok: true };
+}

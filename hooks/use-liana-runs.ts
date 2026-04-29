@@ -164,6 +164,28 @@ export function useLianaRuns({
       },
     );
 
+    // DELETE listener — fire saat user clear history (POST /api/liana/runs/clear)
+    // atau admin manual delete. Supabase Realtime DELETE payload by default
+    // hanya berisi primary key (`old.id`), cukup buat remove dari state.
+    //
+    // Kalau publication FULL replication enabled, payload.old akan punya
+    // semua kolom, tapi kita gak butuh — id aja sudah cukup.
+    channel.on(
+      "postgres_changes",
+      {
+        event: "DELETE",
+        schema: "public",
+        table: "liana_runs",
+        filter: `user_id=eq.${userId}`,
+      },
+      (payload: RealtimePostgresChangesPayload<LianaRun>) => {
+        const oldRow = payload.old as Partial<LianaRun>;
+        if (!oldRow.id) return;
+        const deletedId = oldRow.id;
+        setRuns((prev) => prev.filter((r) => r.id !== deletedId));
+      },
+    );
+
     channel.subscribe();
 
     return () => {

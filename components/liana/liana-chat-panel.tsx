@@ -8,9 +8,12 @@ import {
   ExternalLink,
   Loader2,
   MessageSquare,
+  Trash2,
   X,
 } from "lucide-react";
+import { toast } from "sonner";
 
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import type { LianaRun } from "@/hooks/use-liana-runs";
 import { formatLatencyBreakdown } from "@/lib/finance/liana/format";
@@ -47,6 +50,45 @@ export function LianaChatPanel({ botUsername }: LianaChatPanelProps) {
     setSelectedRunId,
   } = useLianaUI();
   const listRef = React.useRef<HTMLUListElement | null>(null);
+  const [clearOpen, setClearOpen] = React.useState(false);
+
+  // Cuma run yang sudah selesai (done/error) yang ke-clear. Pending dijaga.
+  // Hitung untuk decide apakah tombol di-disable + buat copy dialog yang
+  // informatif.
+  const completedCount = React.useMemo(
+    () => runs.filter((r) => r.status === "done" || r.status === "error").length,
+    [runs],
+  );
+
+  async function handleClearHistory() {
+    try {
+      const res = await fetch("/api/liana/runs/clear", { method: "POST" });
+      const json = (await res.json().catch(() => null)) as
+        | { ok: true; data: { deletedCount: number } }
+        | { ok: false; message?: string }
+        | null;
+      if (!res.ok || !json?.ok) {
+        const msg =
+          (json && !json.ok && json.message) ||
+          "Gagal menghapus riwayat. Coba lagi sebentar.";
+        toast.error(msg);
+        return;
+      }
+      const { deletedCount } = json.data;
+      if (deletedCount === 0) {
+        toast.info("Tidak ada riwayat untuk dihapus.");
+      } else {
+        toast.success(
+          `${deletedCount} percakapan dibersihkan dari riwayat.`,
+        );
+      }
+      // Realtime DELETE event akan auto-update state via useLianaRuns.
+      // Tidak perlu refetch manual.
+    } catch (err) {
+      console.error("[liana-chat-panel] clear history error:", err);
+      toast.error("Tidak bisa menghubungi server. Periksa koneksi.");
+    }
+  }
 
   // Saat selectedRunId di-set (lewat klik "Lihat" pada pill), scroll ke
   // <li data-run-id> yang sesuai dan flash highlight 1x via class CSS.
@@ -129,16 +171,34 @@ export function LianaChatPanel({ botUsername }: LianaChatPanelProps) {
                 </span>
               )}
             </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={() => setOpen(false)}
-              aria-label="Tutup panel"
-              className="h-8 w-8"
-            >
-              <X className="h-4 w-4" aria-hidden />
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => setClearOpen(true)}
+                disabled={completedCount === 0}
+                aria-label="Bersihkan riwayat"
+                title={
+                  completedCount === 0
+                    ? "Belum ada riwayat untuk dibersihkan"
+                    : `Bersihkan ${completedCount} percakapan`
+                }
+                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+              >
+                <Trash2 className="h-4 w-4" aria-hidden />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => setOpen(false)}
+                aria-label="Tutup panel"
+                className="h-8 w-8"
+              >
+                <X className="h-4 w-4" aria-hidden />
+              </Button>
+            </div>
           </div>
 
           {/* Body */}
@@ -174,6 +234,22 @@ export function LianaChatPanel({ botUsername }: LianaChatPanelProps) {
           </div>
         </div>
       </aside>
+
+      <ConfirmDialog
+        open={clearOpen}
+        onOpenChange={setClearOpen}
+        title="Bersihkan riwayat?"
+        description={
+          completedCount === 0
+            ? "Belum ada percakapan yang bisa dibersihkan."
+            : `Akan menghapus ${completedCount} percakapan yang sudah selesai/gagal. ` +
+              `Percakapan yang masih pending tidak akan dihapus. Tindakan ini tidak bisa dibatalkan.`
+        }
+        confirmLabel="Bersihkan"
+        cancelLabel="Batal"
+        variant="destructive"
+        onConfirm={handleClearHistory}
+      />
     </>
   );
 }
