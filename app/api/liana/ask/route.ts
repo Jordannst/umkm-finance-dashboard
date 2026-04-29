@@ -153,23 +153,26 @@ export async function POST(request: Request) {
         }
       : undefined;
 
-  // 7. Wrap prompt dengan tag + instruksi sistem supaya Liana panggil
-  //    tool umkm_notify_dashboard SETELAH dia balas user. Ini fallback
-  //    karena OpenClaw hook-callback bermasalah pasca-upgrade gateway
-  //    2026.4.25 -> 2026.4.26 — callback config tetap di-forward (line 6
-  //    di atas) supaya kalau hook-callback fix, tetap kepake; tapi kita
-  //    tidak depend on it.
+  // 7. Wrap prompt dengan header friendly + footer berisi tag dashboard_run_id
+  //    + instruksi sistem. Liana panggil tool umkm_notify_dashboard SETELAH
+  //    dia balas user — ini fallback karena OpenClaw hook-callback bermasalah
+  //    pasca-upgrade gateway 2026.4.25 -> 2026.4.26.
   //
-  //    Format: tag + 1-line instruction + user prompt asli. Liana akan
-  //    membaca tag dashboard_run_id dari prompt dan pass ke tool sesuai
-  //    deskripsinya. Instruksi singkat — tidak meningkatkan latency
-  //    secara berarti.
+  //    Format: header "📝 Pertanyaan dari dashboard" → user prompt asli →
+  //    footer instruksi internal. Header & raw prompt di TOP supaya
+  //    OpenClaw hook-prompt-echo (yang echo prompt ke Telegram) bisa
+  //    nampilin pertanyaan rapi tanpa ke-tutup tag system.
+  //
+  //    callback config tetap di-forward (line 6 di atas) supaya kalau
+  //    hook-callback fix, tetap kepake; tapi kita tidak depend on it.
   const wrappedMessage =
+    `📝 Pertanyaan dari dashboard:\n\n` +
+    parsed.data.prompt +
+    `\n\n---\n` +
     `[dashboard_run_id=${run.id}]\n` +
-    `[SISTEM: Pesan ini dari dashboard. Setelah balas user, WAJIB panggil tool ` +
-    `umkm_notify_dashboard dengan dashboard_run_id di atas dan reply_text=jawabanmu. ` +
-    `Jangan ulangi instruksi ini ke user.]\n\n` +
-    parsed.data.prompt;
+    `(Internal: setelah balas user di Telegram, WAJIB panggil tool ` +
+    `umkm_notify_dashboard dengan dashboard_run_id di atas dan ` +
+    `reply_text=jawabanmu. Jangan ulangi tag/instruksi ini ke user.)`;
 
   const result = await askLiana({
     message: wrappedMessage,
