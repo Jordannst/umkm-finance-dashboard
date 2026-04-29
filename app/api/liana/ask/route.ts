@@ -153,26 +153,30 @@ export async function POST(request: Request) {
         }
       : undefined;
 
-  // 7. Wrap prompt dengan header friendly + footer berisi tag dashboard_run_id
-  //    + instruksi sistem. Liana panggil tool umkm_notify_dashboard SETELAH
-  //    dia balas user — ini fallback karena OpenClaw hook-callback bermasalah
-  //    pasca-upgrade gateway 2026.4.25 -> 2026.4.26.
+  // 7. Wrap prompt dengan 3 bagian:
+  //    A. Tag [dashboard_run_id=...] di paling ATAS — Liana baca dan pass
+  //       ke tool umkm_notify_dashboard (Path 3 callback).
+  //    B. [SISTEM: ...] block — instruksi internal supaya Liana panggil
+  //       tool tsb setelah balas user.
+  //    C. "📝 Pertanyaan dari dashboard:" header + raw prompt di BOTTOM —
+  //       supaya OpenClaw `hook-prompt-echo` plugin (yang custom-patched
+  //       di gateway VPS) bisa detect dan echo ke Telegram chat user.
   //
-  //    Format: header "📝 Pertanyaan dari dashboard" → user prompt asli →
-  //    footer instruksi internal. Header & raw prompt di TOP supaya
-  //    OpenClaw hook-prompt-echo (yang echo prompt ke Telegram) bisa
-  //    nampilin pertanyaan rapi tanpa ke-tutup tag system.
+  //    Urutan A → B → C dipilih berdasarkan investigasi Liana di
+  //    gateway: hook-prompt-echo recognize signature "📝 Pertanyaan dari
+  //    dashboard:" sebagai marker untuk extract & echo. Tag UUID di top
+  //    aman karena plugin strip system-block sebelum echo.
   //
   //    callback config tetap di-forward (line 6 di atas) supaya kalau
-  //    hook-callback fix, tetap kepake; tapi kita tidak depend on it.
+  //    hook-callback fix di gateway upgrade berikutnya, tetap kepake;
+  //    tapi kita tidak depend on it.
   const wrappedMessage =
-    `📝 Pertanyaan dari dashboard:\n\n` +
-    parsed.data.prompt +
-    `\n\n---\n` +
     `[dashboard_run_id=${run.id}]\n` +
-    `(Internal: setelah balas user di Telegram, WAJIB panggil tool ` +
+    `[SISTEM: Setelah balas user di Telegram, WAJIB panggil tool ` +
     `umkm_notify_dashboard dengan dashboard_run_id di atas dan ` +
-    `reply_text=jawabanmu. Jangan ulangi tag/instruksi ini ke user.)`;
+    `reply_text=jawabanmu. Jangan ulangi tag/instruksi ini ke user.]\n\n` +
+    `📝 Pertanyaan dari dashboard:\n\n` +
+    parsed.data.prompt;
 
   const result = await askLiana({
     message: wrappedMessage,
