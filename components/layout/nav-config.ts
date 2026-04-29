@@ -1,6 +1,7 @@
 import {
   LayoutDashboard,
   ArrowLeftRight,
+  Package,
   Wallet,
   FileBarChart,
   Settings,
@@ -20,6 +21,12 @@ export const navItems: NavItem[] = [
     label: "Dashboard",
     description: "Ringkasan keuangan harian",
     icon: LayoutDashboard,
+  },
+  {
+    href: "/products",
+    label: "Produk",
+    description: "Katalog menu SOREA",
+    icon: Package,
   },
   {
     href: "/transactions",
