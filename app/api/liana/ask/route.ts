@@ -12,7 +12,10 @@ import {
   markRunForwarded,
 } from "@/lib/finance/liana/runs";
 import { createClient } from "@/lib/supabase/server";
-import { sendTelegramMessage } from "@/lib/telegram/send-message";
+import {
+  escapeTelegramHtml,
+  sendTelegramMessage,
+} from "@/lib/telegram/send-message";
 
 export const dynamic = "force-dynamic";
 
@@ -163,9 +166,17 @@ export async function POST(request: Request) {
   //    Await disengaja supaya echo muncul di Telegram BEFORE Liana balas
   //    (urutan visual: pertanyaan user → typing → jawaban). Timeout 5s di
   //    helper jaga supaya tidak nge-block kalau Telegram API lambat.
+  //
+  //    Format: HTML parse mode dengan <blockquote> supaya Telegram render
+  //    kotak quote highlighted (vertical bar + quotation mark indicator).
+  //    Visual lebih jelas memisahkan "ini pertanyaan dari dashboard" vs
+  //    "ini balasan Liana". Italic dipakai untuk feel "kutipan".
   const echoResult = await sendTelegramMessage({
     chatId: profile.telegram_chat_id,
-    text: `📝 Pertanyaan dari dashboard:\n\n${parsed.data.prompt}`,
+    text:
+      `📝 <b>Pertanyaan dari dashboard:</b>\n\n` +
+      `<blockquote><i>${escapeTelegramHtml(parsed.data.prompt)}</i></blockquote>`,
+    parseMode: "HTML",
   });
   if (!echoResult.ok) {
     console.warn(

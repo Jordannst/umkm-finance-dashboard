@@ -103,3 +103,23 @@ export async function sendTelegramMessage(
     clearTimeout(timer);
   }
 }
+
+/**
+ * Escape user content untuk dimasukkan ke Telegram HTML parse mode.
+ * Telegram cuma butuh 3 char di-escape: &, <, >.
+ *
+ * Penting: kalau lo bikin message dengan `parseMode: "HTML"`, semua
+ * konten yang berasal dari user (atau external source) WAJIB di-escape
+ * supaya gak bisa break parsing dengan tag palsu atau injection.
+ *
+ * Contoh:
+ *   const text = `<b>Hello</b> ${escapeTelegramHtml(userInput)}`;
+ *
+ * Reference: https://core.telegram.org/bots/api#html-style
+ */
+export function escapeTelegramHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
