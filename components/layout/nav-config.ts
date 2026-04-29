@@ -2,6 +2,7 @@ import {
   LayoutDashboard,
   ArrowLeftRight,
   Package,
+  ShoppingBag,
   Wallet,
   FileBarChart,
   Settings,
@@ -27,6 +28,12 @@ export const navItems: NavItem[] = [
     label: "Produk",
     description: "Katalog menu SOREA",
     icon: Package,
+  },
+  {
+    href: "/orders",
+    label: "Pesanan",
+    description: "Order operasional & status",
+    icon: ShoppingBag,
   },
   {
     href: "/transactions",
