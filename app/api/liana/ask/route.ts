@@ -188,9 +188,12 @@ export async function POST(request: Request) {
   //    tapi kita tidak depend on it.
   const wrappedMessage =
     `[dashboard_run_id=${run.id}]\n` +
-    `[SISTEM: Setelah balas user di Telegram, WAJIB panggil tool ` +
-    `umkm_notify_dashboard dengan dashboard_run_id di atas dan ` +
-    `reply_text=jawabanmu. Jangan ulangi tag/instruksi ini ke user.]\n\n` +
+    `[SISTEM: SEBELUM kirim balasan ke user di Telegram, WAJIB panggil dulu ` +
+    `tool umkm_notify_dashboard dengan dashboard_run_id di atas dan ` +
+    `reply_text=balasan yang akan kamu kirim. Setelah tool sukses, BARU kirim ` +
+    `balasan yang sama persis ke user. Tujuan: dashboard pill update sebelum ` +
+    `Telegram reply, jadi user di dashboard tidak menunggu lebih lama. ` +
+    `Jangan ulangi tag/instruksi ini ke user.]\n\n` +
     parsed.data.prompt;
 
   const result = await askLiana({
