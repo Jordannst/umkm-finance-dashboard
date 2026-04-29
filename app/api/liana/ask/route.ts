@@ -12,6 +12,7 @@ import {
   markRunForwarded,
 } from "@/lib/finance/liana/runs";
 import { createClient } from "@/lib/supabase/server";
+import { sendTelegramMessage } from "@/lib/telegram/send-message";
 
 export const dynamic = "force-dynamic";
 
@@ -153,19 +154,34 @@ export async function POST(request: Request) {
         }
       : undefined;
 
-  // 7. Wrap prompt dengan 3 bagian:
-  //    A. Tag [dashboard_run_id=...] di paling ATAS — Liana baca dan pass
-  //       ke tool umkm_notify_dashboard (Path 3 callback).
-  //    B. [SISTEM: ...] block — instruksi internal supaya Liana panggil
-  //       tool tsb setelah balas user.
-  //    C. "📝 Pertanyaan dari dashboard:" header + raw prompt di BOTTOM —
-  //       supaya OpenClaw `hook-prompt-echo` plugin (yang custom-patched
-  //       di gateway VPS) bisa detect dan echo ke Telegram chat user.
+  // 7. Echo user prompt ke Telegram chat mereka SEBELUM forward ke Liana.
+  //    OpenClaw `hook-prompt-echo` plugin tidak fire reliably untuk webhook
+  //    source pasca-upgrade gateway 2026.4.26, jadi dashboard kontrol echo
+  //    sendiri via Bot API. Best-effort: kalau gagal/timeout/token-missing,
+  //    ask flow tetap lanjut (warning log, no abort).
   //
-  //    Urutan A → B → C dipilih berdasarkan investigasi Liana di
-  //    gateway: hook-prompt-echo recognize signature "📝 Pertanyaan dari
-  //    dashboard:" sebagai marker untuk extract & echo. Tag UUID di top
-  //    aman karena plugin strip system-block sebelum echo.
+  //    Await disengaja supaya echo muncul di Telegram BEFORE Liana balas
+  //    (urutan visual: pertanyaan user → typing → jawaban). Timeout 5s di
+  //    helper jaga supaya tidak nge-block kalau Telegram API lambat.
+  const echoResult = await sendTelegramMessage({
+    chatId: profile.telegram_chat_id,
+    text: `📝 Pertanyaan dari dashboard:\n\n${parsed.data.prompt}`,
+  });
+  if (!echoResult.ok) {
+    console.warn(
+      "[liana/ask] telegram echo failed (non-fatal):",
+      echoResult.errorMessage,
+    );
+  }
+
+  // 8. Wrap prompt: tag [dashboard_run_id=...] + [SISTEM: ...] block di TOP,
+  //    raw prompt di BOTTOM. Liana baca tag dari prompt dan panggil tool
+  //    umkm_notify_dashboard (Path 3 callback) setelah balas user.
+  //
+  //    Telegram echo sudah dihandle manual di step 7 di atas, jadi format
+  //    ini tidak perlu kompromi untuk hook-prompt-echo lagi. Liana receive
+  //    full message; user di Telegram cuma liat echo bersih dari step 7
+  //    plus reply Liana (system tags tidak terlihat user).
   //
   //    callback config tetap di-forward (line 6 di atas) supaya kalau
   //    hook-callback fix di gateway upgrade berikutnya, tetap kepake;
@@ -175,7 +191,6 @@ export async function POST(request: Request) {
     `[SISTEM: Setelah balas user di Telegram, WAJIB panggil tool ` +
     `umkm_notify_dashboard dengan dashboard_run_id di atas dan ` +
     `reply_text=jawabanmu. Jangan ulangi tag/instruksi ini ke user.]\n\n` +
-    `📝 Pertanyaan dari dashboard:\n\n` +
     parsed.data.prompt;
 
   const result = await askLiana({
