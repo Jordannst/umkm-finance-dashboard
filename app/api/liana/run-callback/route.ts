@@ -1,4 +1,3 @@
-import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 
 import {
@@ -8,6 +7,20 @@ import {
 } from "@/lib/api/responses";
 import { markRunDone, markRunError } from "@/lib/finance/liana/runs";
 
+/**
+ * Edge runtime untuk eliminate cold start (~500-1500ms cold di Node
+ * serverless → ~50ms warm di Edge). Critical karena callback ini yang
+ * trigger pill transition ke 'done' di dashboard — setiap detik delay
+ * kerasa banget pas user nungguin.
+ *
+ * Edge runtime constraint: gak boleh pakai node:* APIs (no Buffer, no
+ * crypto.timingSafeEqual). Constant-time compare di bawah pakai
+ * TextEncoder + char-by-char XOR yang work di kedua runtime.
+ *
+ * Supabase client (@supabase/supabase-js) edge-compatible. markRunDone
+ * + markRunError pakai admin client yang aman di Edge.
+ */
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 /**
@@ -48,6 +61,26 @@ export const dynamic = "force-dynamic";
  * Update by id selalu deterministik — jadi multi-call aman.
  */
 
+/**
+ * Constant-time bytes compare (no early-return on first mismatch).
+ * Manual implementation pakai TextEncoder — work di Node + Edge runtime.
+ *
+ * Threat model: prevent timing-attack di mana attacker bisa nebak token
+ * char-per-char dari measured response time. O(n) selalu, n = len(a).
+ */
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  const enc = new TextEncoder();
+  const aBytes = enc.encode(a);
+  const bBytes = enc.encode(b);
+  if (aBytes.length !== bBytes.length) return false;
+  let diff = 0;
+  for (let i = 0; i < aBytes.length; i++) {
+    diff |= aBytes[i] ^ bBytes[i];
+  }
+  return diff === 0;
+}
+
 // Auth: bearer = process.env.OPENCLAW_HOOK_TOKEN, timing-safe compare.
 function verifyCallbackAuth(request: Request): Response | null {
   const expected = process.env.OPENCLAW_HOOK_TOKEN;
@@ -70,16 +103,7 @@ function verifyCallbackAuth(request: Request): Response | null {
       401,
     );
   }
-  const a = Buffer.from(expected);
-  const b = Buffer.from(match[1].trim());
-  if (a.length !== b.length) {
-    return apiError("unauthorized", "Token tidak valid.", 401);
-  }
-  try {
-    if (!timingSafeEqual(a, b)) {
-      return apiError("unauthorized", "Token tidak valid.", 401);
-    }
-  } catch {
+  if (!constantTimeEqual(expected, match[1].trim())) {
     return apiError("unauthorized", "Token tidak valid.", 401);
   }
   return null;
