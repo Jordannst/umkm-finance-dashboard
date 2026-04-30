@@ -47,17 +47,21 @@ export const createOrderInputSchema = z.object({
     .trim()
     .min(1, { message: "Metode fulfillment wajib diisi." })
     .max(60, { message: "Metode fulfillment maksimal 60 karakter." }),
+  // .nullish() = .nullable().optional() — accept undefined, null, atau
+  // string. MCP kirim null literal kalau customer tidak sebut alamat,
+  // browser form kirim undefined / empty string. Semua di-normalize ke
+  // null oleh transform.
   address: z
     .string()
     .trim()
     .max(500, { message: "Alamat maksimal 500 karakter." })
-    .optional()
+    .nullish()
     .transform((v) => (v && v.length > 0 ? v : null)),
   notes: z
     .string()
     .trim()
     .max(500, { message: "Catatan maksimal 500 karakter." })
-    .optional()
+    .nullish()
     .transform((v) => (v && v.length > 0 ? v : null)),
   items: z
     .array(orderItemInputSchema)
@@ -67,7 +71,7 @@ export const createOrderInputSchema = z.object({
     .string()
     .trim()
     .max(120)
-    .optional()
+    .nullish()
     .transform((v) => (v && v.length > 0 ? v : null)),
   created_from_source: orderSourceSchema.optional().default("dashboard"),
 });
@@ -396,13 +400,13 @@ export const updateOrderInputSchema = z
       .string()
       .trim()
       .max(500)
-      .optional()
+      .nullish()
       .transform((v) => (v && v.length > 0 ? v : null)),
     notes: z
       .string()
       .trim()
       .max(500)
-      .optional()
+      .nullish()
       .transform((v) => (v && v.length > 0 ? v : null)),
   })
   .strict();
