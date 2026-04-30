@@ -1,5 +1,5 @@
 import { apiError, apiOk } from "@/lib/api/responses";
-import { getCurrentBusinessId } from "@/lib/finance/business";
+import { resolveBusinessAuth } from "@/lib/api/dual-auth";
 import { createOrderForBusiness } from "@/lib/sorea/orders/actions";
 import { listOrders } from "@/lib/sorea/orders/queries";
 import type { OrderStatus, PaymentStatus } from "@/types/sorea";
@@ -18,27 +18,27 @@ export const dynamic = "force-dynamic";
  *
  * Response: { ok: true, data: { orders: Order[] } }
  *
- * Auth: dashboard session (RLS auto-scope ke current business).
+ * Auth: dual mode (Phase 4):
+ *   - Session: dashboard user normal (RLS scoped via cookie)
+ *   - Bearer LIANA_SHARED_SECRET: MCP, scoped via LIANA_BUSINESS_ID env.
  */
 export async function GET(request: Request) {
-  const businessId = await getCurrentBusinessId();
-  if (!businessId) {
-    return apiError(
-      "no_business",
-      "Akun belum terhubung ke bisnis manapun.",
-      412,
-    );
-  }
+  const auth = await resolveBusinessAuth(request);
+  if (!auth.ok) return auth.response;
 
   const url = new URL(request.url);
-  const orders = await listOrders(businessId, {
-    status: parseOrderStatus(url.searchParams.get("status")),
-    paymentStatus: parsePaymentStatus(url.searchParams.get("payment_status")),
-    from: url.searchParams.get("from"),
-    to: url.searchParams.get("to"),
-    search: url.searchParams.get("search"),
-    limit: parseLimit(url.searchParams.get("limit")),
-  });
+  const orders = await listOrders(
+    auth.businessId,
+    {
+      status: parseOrderStatus(url.searchParams.get("status")),
+      paymentStatus: parsePaymentStatus(url.searchParams.get("payment_status")),
+      from: url.searchParams.get("from"),
+      to: url.searchParams.get("to"),
+      search: url.searchParams.get("search"),
+      limit: parseLimit(url.searchParams.get("limit")),
+    },
+    auth.supabase,
+  );
 
   return apiOk({ orders });
 }
@@ -53,26 +53,25 @@ export async function GET(request: Request) {
  * - Reject product yang inactive / habis / tidak ada
  * - Generate order_code unique (retry-on-conflict)
  *
- * Auth: dashboard session. Phase 4 nanti tambah jalur shared-secret
- * bearer untuk Liana MCP — sementara session-only.
+ * Auth: dual mode (Phase 4):
+ *   - Session: dashboard user normal (RLS scoped via cookie)
+ *   - Bearer LIANA_SHARED_SECRET: Liana MCP server-to-server. business
+ *     scope di-enforce dari env LIANA_BUSINESS_ID, bukan dari payload
+ *     client — jadi penyerang yang punya secret tetap tidak bisa create
+ *     order untuk business lain.
  *
  * Response sukses: { ok: true, data: { order, items } } status 201
  * Response error :
  *   400 validation_failed
+ *   401 unauthorized (bearer salah)
  *   409 order_code_conflict (rare)
  *   412 no_business
  *   422 product_not_found / product_inactive / product_out_of_stock
  *   500 db_error
  */
 export async function POST(request: Request) {
-  const businessId = await getCurrentBusinessId();
-  if (!businessId) {
-    return apiError(
-      "no_business",
-      "Akun belum terhubung ke bisnis manapun.",
-      412,
-    );
-  }
+  const auth = await resolveBusinessAuth(request);
+  if (!auth.ok) return auth.response;
 
   let raw: unknown;
   try {
@@ -81,7 +80,23 @@ export async function POST(request: Request) {
     return apiError("invalid_json", "Body bukan JSON valid.", 400);
   }
 
-  const result = await createOrderForBusiness({ businessId, rawInput: raw });
+  // Untuk request bearer (MCP), set default created_from_source='chat'
+  // kalau client tidak kirim explicit. Untuk session, default tetap 'manual'.
+  if (auth.mode === "bearer" && raw && typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    if (obj.created_from_source === undefined) {
+      obj.created_from_source = "chat";
+    }
+    if (obj.created_by === undefined) {
+      obj.created_by = "Liana";
+    }
+  }
+
+  const result = await createOrderForBusiness({
+    businessId: auth.businessId,
+    rawInput: raw,
+    client: auth.supabase,
+  });
 
   if (!result.ok) {
     const status =

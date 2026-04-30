@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { SupabaseClient } from "@supabase/supabase-js";
 import QRCode from "qrcode";
 
 import {
@@ -58,8 +59,10 @@ export async function generateQrisForOrder(params: {
   orderId: string;
   /** Optional callback URL override; default dibangun dari NEXT_PUBLIC_APP_URL */
   callbackUrl?: string;
+  /** Optional supabase client; default: session-based via createClient() */
+  client?: SupabaseClient;
 }): Promise<GenerateQrisResult> {
-  const supabase = await createClient();
+  const supabase = params.client ?? (await createClient());
 
   // 1. Fetch order
   const { data: orderRow, error: orderErr } = await supabase
@@ -405,8 +408,9 @@ export type SimulateResult =
 export async function simulatePakasirSuccess(params: {
   businessId: string;
   orderId: string;
+  client?: SupabaseClient;
 }): Promise<SimulateResult> {
-  const supabase = await createClient();
+  const supabase = params.client ?? (await createClient());
   const { data: orderRow, error: fetchErr } = await supabase
     .from("orders")
     .select("*")

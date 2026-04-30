@@ -1,5 +1,5 @@
 import { apiError, apiOk } from "@/lib/api/responses";
-import { getCurrentBusinessId } from "@/lib/finance/business";
+import { resolveBusinessAuth } from "@/lib/api/dual-auth";
 import { updateOrderForBusiness } from "@/lib/sorea/orders/actions";
 import { getOrderWithItems } from "@/lib/sorea/orders/queries";
 
@@ -13,23 +13,19 @@ interface RouteContext {
  * GET /api/orders/:id
  *
  * Detail order beserta items. 404 kalau tidak ada / soft-deleted.
+ *
+ * Auth: dual mode (Phase 4) — session atau Bearer LIANA_SHARED_SECRET.
  */
-export async function GET(_request: Request, context: RouteContext) {
+export async function GET(request: Request, context: RouteContext) {
   const { id } = await context.params;
   if (!id) {
     return apiError("invalid_id", "ID order tidak valid.", 400);
   }
 
-  const businessId = await getCurrentBusinessId();
-  if (!businessId) {
-    return apiError(
-      "no_business",
-      "Akun belum terhubung ke bisnis manapun.",
-      412,
-    );
-  }
+  const auth = await resolveBusinessAuth(request);
+  if (!auth.ok) return auth.response;
 
-  const order = await getOrderWithItems(businessId, id);
+  const order = await getOrderWithItems(auth.businessId, id, auth.supabase);
   if (!order) {
     return apiError("not_found", "Order tidak ditemukan.", 404);
   }
@@ -46,8 +42,11 @@ export async function GET(_request: Request, context: RouteContext) {
  *
  * Body partial — pakai schema di lib/sorea/orders/actions.ts.
  *
+ * Auth: dual mode (Phase 4) — session atau Bearer LIANA_SHARED_SECRET.
+ *
  * Response: { ok: true, data: { order } }
  *   400 validation_failed
+ *   401 unauthorized
  *   404 not_found
  *   500 db_error
  */
@@ -57,14 +56,8 @@ export async function PATCH(request: Request, context: RouteContext) {
     return apiError("invalid_id", "ID order tidak valid.", 400);
   }
 
-  const businessId = await getCurrentBusinessId();
-  if (!businessId) {
-    return apiError(
-      "no_business",
-      "Akun belum terhubung ke bisnis manapun.",
-      412,
-    );
-  }
+  const auth = await resolveBusinessAuth(request);
+  if (!auth.ok) return auth.response;
 
   let raw: unknown;
   try {
@@ -74,9 +67,10 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   const result = await updateOrderForBusiness({
-    businessId,
+    businessId: auth.businessId,
     id,
     rawInput: raw,
+    client: auth.supabase,
   });
 
   if (!result.ok) {

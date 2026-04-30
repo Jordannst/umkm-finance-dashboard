@@ -91,13 +91,14 @@ export type CreateOrderInput = z.infer<typeof createOrderInputSchema>;
 async function generateOrderCode(
   businessId: string,
   attemptOffset: number = 0,
+  supabase?: SupabaseClient,
 ): Promise<string> {
   // todayJakarta() returns "YYYY-MM-DD". Strip dash supaya jadi YYYYMMDD.
   const todayDashes = todayJakarta(); // e.g. "2026-04-29"
   const todayPacked = todayDashes.replaceAll("-", ""); // e.g. "20260429"
   const prefix = `ORD-${todayPacked}-`;
 
-  const count = await countOrdersForToday(businessId, prefix);
+  const count = await countOrdersForToday(businessId, prefix, supabase);
   const next = count + 1 + attemptOffset;
   // Pad min 3 digits (P001-P999), 4+ digits naturally untuk overflow.
   const padded = String(next).padStart(3, "0");
@@ -143,7 +144,10 @@ export type CreateOrderResult =
 export async function createOrderForBusiness(params: {
   businessId: string;
   rawInput: unknown;
+  /** Optional supabase client; default: session-based via createClient() */
+  client?: SupabaseClient;
 }): Promise<CreateOrderResult> {
+  const sb = params.client;
   const parsed = createOrderInputSchema.safeParse(params.rawInput);
   if (!parsed.success) {
     const fieldErrors: Record<string, string> = {};
@@ -166,7 +170,7 @@ export async function createOrderForBusiness(params: {
   // Resolve setiap product. Pakai Promise.all untuk parallel lookups.
   const resolvedResults = await Promise.all(
     dedupedItems.map((it) =>
-      getProductBySku(params.businessId, it.sku).then((product) => ({
+      getProductBySku(params.businessId, it.sku, sb).then((product) => ({
         input: it,
         product,
       })),
@@ -216,7 +220,7 @@ export async function createOrderForBusiness(params: {
   const orderTotal = itemRows.reduce((sum, r) => sum + r.subtotal, 0);
 
   // Insert order dengan retry-on-conflict pada order_code unique.
-  const supabase = await createClient();
+  const supabase = sb ?? (await createClient());
   const created = await insertOrderWithRetry(supabase, {
     businessId: params.businessId,
     customerName: input.customer_name,
@@ -310,7 +314,11 @@ async function insertOrderWithRetry(
 > {
   const MAX_ATTEMPTS = 5;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const orderCode = await generateOrderCode(payload.businessId, attempt);
+    const orderCode = await generateOrderCode(
+      payload.businessId,
+      attempt,
+      supabase,
+    );
 
     const { data, error } = await supabase
       .from("orders")
@@ -423,6 +431,7 @@ export async function updateOrderForBusiness(params: {
   businessId: string;
   id: string;
   rawInput: unknown;
+  client?: SupabaseClient;
 }): Promise<UpdateOrderResult> {
   const parsed = updateOrderInputSchema.safeParse(params.rawInput);
   if (!parsed.success) {
@@ -450,7 +459,7 @@ export async function updateOrderForBusiness(params: {
     };
   }
 
-  const supabase = await createClient();
+  const supabase = params.client ?? (await createClient());
   const { data, error } = await supabase
     .from("orders")
     .update(updatePayload)
@@ -493,6 +502,7 @@ export async function updateOrderStatusForBusiness(params: {
    * order_status='pembayaran_berhasil' + payment_status='paid'.
    */
   alsoPaymentStatus?: PaymentStatus;
+  client?: SupabaseClient;
 }): Promise<UpdateOrderResult> {
   const rawInput: Record<string, OrderStatus | PaymentStatus> = {
     order_status: params.newStatus,
@@ -504,6 +514,7 @@ export async function updateOrderStatusForBusiness(params: {
     businessId: params.businessId,
     id: params.id,
     rawInput,
+    client: params.client,
   });
 }
 

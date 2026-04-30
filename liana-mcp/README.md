@@ -2,7 +2,9 @@
 
 MCP (Model Context Protocol) server untuk integrasi **OpenClaw / Liana** dengan **Dashboard Keuangan UMKM**.
 
-Memberikan 5 tools ke agent Liana:
+Memberikan **10 tools** ke agent Liana:
+
+### Finance (Phase 1)
 
 | Tool | Fungsi |
 |---|---|
@@ -11,6 +13,44 @@ Memberikan 5 tools ke agent Liana:
 | `umkm_catat_pembayaran_piutang` | Catat pembayaran piutang (atomik via SQL function) |
 | `umkm_ambil_rekap` | Ringkasan untuk periode today / week / month |
 | `umkm_health_check` | Test koneksi dashboard |
+| `umkm_notify_dashboard` | Callback ke dashboard saat reply terkirim |
+
+### Order chat (Phase 4)
+
+| Tool | Fungsi |
+|---|---|
+| `umkm_catalog_search` | Cari produk (name/SKU/kategori), default hanya yang aktif & ready |
+| `umkm_create_order` | Buat order dari chat customer (server resolve harga) |
+| `umkm_generate_qris` | Generate QRIS demo Pakasir untuk order |
+| `umkm_order_get` | Cek status & detail 1 order |
+
+### Contoh flow `/pesan`
+
+```
+User Telegram:
+  /pesan Patricia 1 Matcha Cream, 2 French Fries, ambil di tempat, less sugar
+
+Liana:
+  1. umkm_catalog_search query="matcha cream"  → SKU=P004, Rp22.000
+  2. umkm_catalog_search query="french fries"  → SKU=P010, Rp16.000
+  3. umkm_create_order(customer_name="Patricia",
+       fulfillment_method="Ambil di tempat",
+       items=[{sku:"P004",qty:1},{sku:"P010",qty:2}],
+       notes="less sugar")
+     → ORD-20260429-002, total Rp54.000
+  4. umkm_generate_qris(order_id="...")
+     → Rp600 demo, total payable Rp1.603 (incl fee)
+
+Liana balas chat:
+  Pesanan dibuat ✅
+  Order: ORD-20260429-002
+  • 1× SOREA Matcha Cream — Rp22.000
+  • 2× French Fries — Rp32.000
+  Total normal: Rp54.000
+  QRIS demo Pakasir: Rp600 (total payable Rp1.603)
+  Scan QR / detail: https://your-app.vercel.app/orders/<uuid>
+  Status: menunggu pembayaran
+```
 
 ## Persyaratan
 
@@ -57,7 +97,7 @@ openclaw mcp add umkm-finance \
 openclaw mcp list
 ```
 
-Harus muncul `umkm-finance` dengan 5 tools (`umkm_catat_pemasukan_pengeluaran`, dst).
+Harus muncul `umkm-finance` dengan 10 tools (lihat tabel di atas).
 
 Test koneksi:
 
@@ -102,6 +142,27 @@ curl https://your-app.vercel.app/api/liana/health
 ### `business_not_found` (404)
 
 `BUSINESS_ID` UUID tidak cocok dengan row di tabel `businesses` di Supabase. Buka dashboard → Settings → Profil bisnis untuk lihat UUID yang benar.
+
+### `server_misconfigured` (503) — Phase 4 only
+
+Tool `umkm_catalog_search`, `umkm_create_order`, `umkm_generate_qris`, atau `umkm_order_get` return `server_misconfigured`:
+
+- **Dashboard side** belum set `LIANA_BUSINESS_ID` env. Tambahkan di Vercel:
+
+  ```
+  LIANA_BUSINESS_ID=11111111-1111-4111-8111-111111111111
+  ```
+
+  (Sama UUID dengan `BUSINESS_ID` di MCP env. Dashboard butuh ini untuk scope dual-auth.)
+
+  Trigger Vercel redeploy setelah env diubah, lalu retry.
+
+### `unauthorized` di Phase 4 endpoints
+
+`/api/orders` atau `/api/products` return `unauthorized` walaupun secret benar:
+
+- Cek `LIANA_SHARED_SECRET` di Vercel === di MCP env, **char-by-char**.
+- Pastikan tidak ada whitespace/newline trailing.
 
 ### MCP server tidak start
 

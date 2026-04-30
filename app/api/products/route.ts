@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { apiError, apiOk, zodIssuesToFieldErrors } from "@/lib/api/responses";
+import { resolveBusinessAuth } from "@/lib/api/dual-auth";
 import { getCurrentBusinessId } from "@/lib/finance/business";
 import { listProducts } from "@/lib/sorea/products/queries";
 import { createClient } from "@/lib/supabase/server";
@@ -19,26 +20,28 @@ export const dynamic = "force-dynamic";
  *
  * Response: { ok: true, data: { products: Product[] } }
  *
- * Auth: dashboard session (RLS auto-scope ke current business).
+ * Auth: dual mode (Phase 4):
+ *   - Session: dashboard user normal (RLS scoped via cookie)
+ *   - Bearer LIANA_SHARED_SECRET: MCP server-to-server, scoped via
+ *     LIANA_BUSINESS_ID env (admin client, bypass RLS tapi tetap filter
+ *     by business_id).
  */
 export async function GET(request: Request) {
-  const businessId = await getCurrentBusinessId();
-  if (!businessId) {
-    return apiError(
-      "no_business",
-      "Akun belum terhubung ke bisnis manapun.",
-      412,
-    );
-  }
+  const auth = await resolveBusinessAuth(request);
+  if (!auth.ok) return auth.response;
 
   const url = new URL(request.url);
-  const products = await listProducts(businessId, {
-    activeOnly: url.searchParams.get("active") === "true",
-    category: url.searchParams.get("category"),
-    search: url.searchParams.get("search"),
-    stockStatus: parseStockStatus(url.searchParams.get("stock_status")),
-    limit: parseLimit(url.searchParams.get("limit")),
-  });
+  const products = await listProducts(
+    auth.businessId,
+    {
+      activeOnly: url.searchParams.get("active") === "true",
+      category: url.searchParams.get("category"),
+      search: url.searchParams.get("search"),
+      stockStatus: parseStockStatus(url.searchParams.get("stock_status")),
+      limit: parseLimit(url.searchParams.get("limit")),
+    },
+    auth.supabase,
+  );
 
   return apiOk({ products });
 }

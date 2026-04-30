@@ -2,13 +2,22 @@
 /**
  * MCP Server untuk Dashboard Keuangan UMKM.
  *
- * Dipakai oleh OpenClaw (Liana) untuk menambah 6 skill keuangan UMKM:
+ * Dipakai oleh OpenClaw (Liana) untuk menambah skill keuangan + order
+ * (order chat → invoice + QRIS Pakasir Phase 4):
+ *
+ *  Finance (Phase 1):
  *  1. umkm_catat_pemasukan_pengeluaran
  *  2. umkm_catat_piutang_baru
  *  3. umkm_catat_pembayaran_piutang
  *  4. umkm_ambil_rekap
  *  5. umkm_health_check
  *  6. umkm_notify_dashboard (callback ke dashboard setelah Liana balas)
+ *
+ *  Order chat (Phase 4):
+ *  7. umkm_catalog_search        — cari produk by name/SKU/category
+ *  8. umkm_create_order          — buat order dari chat
+ *  9. umkm_generate_qris         — generate QRIS demo Pakasir
+ *  10. umkm_order_get            — cek status order (by id atau code)
  *
  * Cara register di OpenClaw:
  *
@@ -670,6 +679,462 @@ server.tool(
         ? "Dashboard ter-update: status=done, reply_text disimpan. Pill di chat panel akan switch ke 'done'."
         : `Notifikasi terkirim, tapi dashboard_run_id ${args.dashboard_run_id} tidak ditemukan di database. Cek apakah UUID di tag sesuai dengan prompt user.`,
     );
+  },
+);
+
+// =====================================================================
+// Phase 4: Order chat tools (catalog → order → QRIS)
+// =====================================================================
+
+// ---------------------------------------------------------------------
+// Tool 7: Catalog search
+// ---------------------------------------------------------------------
+server.tool(
+  "umkm_catalog_search",
+  "Cari produk dari katalog dashboard. WAJIB dipanggil sebelum umkm_create_order " +
+    "kalau user sebut produk dengan nama natural (mis. 'matcha cream', 'fries'), " +
+    "supaya dapat SKU yang valid. Default hanya tampilkan produk aktif & ready " +
+    "stok (only_ready=true). Set query='' untuk list semua aktif (max 200).",
+  {
+    query: z
+      .string()
+      .optional()
+      .describe(
+        "Substring case-insensitive yang dicocokkan dengan name ATAU SKU. " +
+          "Kosongkan untuk list semua. Contoh: 'matcha', 'P004'.",
+      ),
+    category: z
+      .string()
+      .optional()
+      .describe(
+        "Filter by kategori exact match (mis. 'Coffee', 'Snack'). Kosongkan kalau tidak yakin.",
+      ),
+    only_ready: z
+      .boolean()
+      .optional()
+      .default(true)
+      .describe(
+        "Default true: filter is_active=true + stock_status='ready'. " +
+          "Set false kalau owner mau lihat semua termasuk habis/preorder.",
+      ),
+    limit: z
+      .number()
+      .int()
+      .positive()
+      .max(50)
+      .optional()
+      .default(20)
+      .describe("Maksimum hasil (default 20, hard cap 50)."),
+  },
+  async (args) => {
+    const ctx = { tool: "umkm_catalog_search", rid: mkRid() };
+    const start = Date.now();
+    console.error(`[mcp] tool=${ctx.tool} rid=${ctx.rid} start`);
+
+    const qs = new URLSearchParams();
+    if (args.query?.trim()) qs.set("search", args.query.trim());
+    if (args.category?.trim()) qs.set("category", args.category.trim());
+    if (args.only_ready !== false) {
+      qs.set("active", "true");
+      qs.set("stock_status", "ready");
+    }
+    if (args.limit) qs.set("limit", String(args.limit));
+
+    const result = await callApi(
+      "GET",
+      `/api/products?${qs.toString()}`,
+      null,
+      ctx,
+    );
+
+    if (!result.ok) {
+      console.error(
+        `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=error code=${result.error?.code ?? "unknown"}`,
+      );
+      return asError(
+        `${result.error?.code ?? "unknown"}: ${result.error?.message ?? "tidak diketahui"}`,
+      );
+    }
+
+    const products = result.data?.products ?? [];
+    if (products.length === 0) {
+      console.error(
+        `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=ok count=0`,
+      );
+      return asText(
+        "Tidak ada produk yang cocok. " +
+          (args.only_ready
+            ? "Coba lepas only_ready (set false) untuk lihat produk yang habis/preorder."
+            : "Cek lagi query/kategori atau owner perlu tambah produk dulu di dashboard."),
+      );
+    }
+
+    const lines = [`${products.length} produk ditemukan:`];
+    for (const p of products) {
+      const stock = p.stock_status ? ` [${p.stock_status}]` : "";
+      const cat = p.category ? ` · ${p.category}` : "";
+      const inactive = p.is_active === false ? " (NON-AKTIF)" : "";
+      lines.push(
+        `  ${p.sku} — ${p.name} — ${formatRupiah(Number(p.price))}${cat}${stock}${inactive}`,
+      );
+    }
+
+    console.error(
+      `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=ok count=${products.length}`,
+    );
+    return asText(lines.join("\n"));
+  },
+);
+
+// ---------------------------------------------------------------------
+// Tool 8: Create order
+// ---------------------------------------------------------------------
+server.tool(
+  "umkm_create_order",
+  "Buat order baru di dashboard berdasarkan permintaan customer dari chat. " +
+    "WAJIB pakai SKU (bukan nama produk). Resolve nama → SKU dulu via " +
+    "umkm_catalog_search kalau user sebut nama natural. Server akan: " +
+    "(1) resolve harga dari katalog (TIDAK terima harga dari client), " +
+    "(2) reject produk inactive/habis, (3) generate order_code unik. " +
+    "Order baru otomatis status='menunggu_pembayaran' & source='chat'. " +
+    "Setelah order dibuat, lanjutkan dengan umkm_generate_qris.",
+  {
+    customer_name: z
+      .string()
+      .min(1)
+      .max(120)
+      .describe("Nama pelanggan/customer yang pesan (dari chat)."),
+    fulfillment_method: z
+      .string()
+      .min(1)
+      .max(60)
+      .describe(
+        "Cara ambil/antar. Contoh valid: 'Ambil di tempat', 'Antar (gojek)', " +
+          "'Antar (grab)', 'Antar sendiri'. Tanya ke customer kalau tidak tahu.",
+      ),
+    items: z
+      .array(
+        z.object({
+          sku: z
+            .string()
+            .min(1)
+            .describe("Kode SKU produk (mis. 'P004'). Resolve via umkm_catalog_search dulu."),
+          qty: z
+            .number()
+            .int()
+            .positive()
+            .describe("Jumlah item, harus integer positif."),
+        }),
+      )
+      .min(1)
+      .max(20)
+      .describe("List item pesanan, minimal 1 maksimum 20."),
+    address: z
+      .string()
+      .max(255)
+      .optional()
+      .describe(
+        "Alamat antar (kalau fulfillment 'Antar ...'). Kosongkan kalau ambil di tempat.",
+      ),
+    notes: z
+      .string()
+      .max(500)
+      .optional()
+      .describe(
+        "Catatan dari customer (mis. 'less sugar', 'pedas level 2'). Boleh kosong.",
+      ),
+  },
+  async (args) => {
+    const ctx = { tool: "umkm_create_order", rid: mkRid() };
+    const start = Date.now();
+    console.error(
+      `[mcp] tool=${ctx.tool} rid=${ctx.rid} start customer=${args.customer_name} items=${args.items.length}`,
+    );
+
+    const body = {
+      customer_name: args.customer_name,
+      fulfillment_method: args.fulfillment_method,
+      address: args.address ?? null,
+      notes: args.notes ?? null,
+      items: args.items,
+      // server-side default: created_from_source='chat', created_by='Liana'
+      // (di-set otomatis di /api/orders bearer mode).
+    };
+
+    const result = await callApi("POST", "/api/orders", body, ctx);
+
+    if (!result.ok) {
+      const code = result.error?.code ?? "unknown";
+      const msg = result.error?.message ?? "tidak diketahui";
+      console.error(
+        `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=error code=${code}`,
+      );
+      // Translate code yang penting jadi pesan natural untuk Liana.
+      if (code === "validation_failed") {
+        const fieldMsgs = result.error?.fieldErrors
+          ? Object.entries(result.error.fieldErrors)
+              .map(([k, v]) => `${k}: ${v}`)
+              .join("; ")
+          : msg;
+        return asError(`Validasi gagal: ${fieldMsgs}`);
+      }
+      if (code === "product_not_found") {
+        return asError(
+          `Produk tidak ditemukan: ${msg}. ` +
+            `Cek SKU dengan umkm_catalog_search dulu.`,
+        );
+      }
+      if (code === "product_inactive") {
+        return asError(`Produk sedang non-aktif: ${msg}`);
+      }
+      if (code === "product_out_of_stock") {
+        return asError(`Produk habis stok: ${msg}`);
+      }
+      return asError(`${code}: ${msg}`);
+    }
+
+    const order = result.data?.order;
+    const items = result.data?.items ?? [];
+    const detailUrl = order?.id
+      ? `${DASHBOARD_URL}/orders/${order.id}`
+      : null;
+
+    const lines = [];
+    lines.push(`Pesanan dibuat ✅`);
+    lines.push(`Order: ${order?.order_code}`);
+    for (const it of items) {
+      lines.push(
+        `• ${it.qty}× ${it.product_name} — ${formatRupiah(Number(it.subtotal))}`,
+      );
+    }
+    lines.push(`Total normal: ${formatRupiah(Number(order?.order_total_amount))}`);
+    if (detailUrl) lines.push(`Detail: ${detailUrl}`);
+    lines.push(`Status: menunggu pembayaran`);
+    lines.push(``);
+    lines.push(
+      `Lanjut: panggil umkm_generate_qris dengan order_id=${order?.id} ` +
+        `untuk dapat QRIS demo Pakasir.`,
+    );
+
+    console.error(
+      `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=ok order_code=${order?.order_code}`,
+    );
+    return asText(lines.join("\n"));
+  },
+);
+
+// ---------------------------------------------------------------------
+// Tool 9: Generate QRIS
+// ---------------------------------------------------------------------
+server.tool(
+  "umkm_generate_qris",
+  "Generate QRIS demo Pakasir untuk order yang sudah ada. WAJIB dipanggil " +
+    "setelah umkm_create_order. Bisa pakai order_id (UUID) ATAU order_code " +
+    "(mis. 'ORD-20260429-001'). Server akan return: payment_amount (nominal " +
+    "demo, default Rp600), total_payment (amount + fee Pakasir), expires_at, " +
+    "dan link detail order. JANGAN kirim QR EMV string mentah ke chat — " +
+    "panjang & confusing. Gunakan link detail biar customer scan QR di " +
+    "halaman dashboard.",
+  {
+    order_id: z
+      .string()
+      .optional()
+      .describe(
+        "UUID order. Ambil dari output umkm_create_order. Pilih ini untuk presisi.",
+      ),
+    order_code: z
+      .string()
+      .optional()
+      .describe(
+        "Order code (mis. 'ORD-20260429-001'). Server akan resolve ke UUID. " +
+          "Pilih kalau hanya tahu code, mis. user reply 'sudah bayar order ORD-...'.",
+      ),
+  },
+  async (args) => {
+    const ctx = { tool: "umkm_generate_qris", rid: mkRid() };
+    const start = Date.now();
+    console.error(`[mcp] tool=${ctx.tool} rid=${ctx.rid} start`);
+
+    if (!args.order_id && !args.order_code) {
+      console.error(
+        `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=error code=missing_target`,
+      );
+      return asError("Wajib isi salah satu: order_id atau order_code.");
+    }
+
+    // Resolve order_code → order_id kalau perlu.
+    let orderId = args.order_id?.trim();
+    let orderCode = args.order_code?.trim();
+
+    if (!orderId && orderCode) {
+      const lookup = await callApi(
+        "GET",
+        `/api/orders?search=${encodeURIComponent(orderCode)}&limit=5`,
+        null,
+        ctx,
+      );
+      if (!lookup.ok) {
+        console.error(
+          `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=error code=lookup_failed`,
+        );
+        return asError(
+          `Gagal cari order dengan code ${orderCode}: ${lookup.error?.message ?? ""}`,
+        );
+      }
+      const matches = (lookup.data?.orders ?? []).filter(
+        (o) => o.order_code === orderCode,
+      );
+      if (matches.length === 0) {
+        console.error(
+          `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=error code=order_not_found`,
+        );
+        return asError(`Order dengan code ${orderCode} tidak ditemukan.`);
+      }
+      orderId = matches[0].id;
+    }
+
+    const result = await callApi(
+      "POST",
+      `/api/orders/${orderId}/payment/pakasir/create`,
+      {},
+      ctx,
+    );
+
+    if (!result.ok) {
+      const code = result.error?.code ?? "unknown";
+      const msg = result.error?.message ?? "tidak diketahui";
+      console.error(
+        `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=error code=${code}`,
+      );
+      if (code === "order_already_paid") {
+        return asError(
+          `Order ini sudah lunas, tidak perlu QRIS lagi. Detail: ${DASHBOARD_URL}/orders/${orderId}`,
+        );
+      }
+      if (code === "order_cancelled") {
+        return asError(`Order ini sudah dibatalkan, tidak bisa generate QRIS.`);
+      }
+      if (code === "config_error") {
+        return asError(
+          "Pakasir belum dikonfigurasi di server (PAKASIR_API_KEY/PROJECT_ID kosong). " +
+            "Hubungi owner untuk set env.",
+        );
+      }
+      if (code === "pakasir_error") {
+        return asError(`Pakasir reject: ${msg}`);
+      }
+      return asError(`${code}: ${msg}`);
+    }
+
+    const display = result.data?.display;
+    const detailUrl = `${DASHBOARD_URL}/orders/${orderId}`;
+    const lines = [];
+    lines.push(`QRIS demo siap ✅`);
+    if (orderCode) lines.push(`Order: ${orderCode}`);
+    lines.push(`Nominal: ${formatRupiah(Number(display?.amount ?? 0))}`);
+    if (display?.totalPayment != null && display.totalPayment > display.amount) {
+      lines.push(
+        `Total payable Pakasir: ${formatRupiah(Number(display.totalPayment))} ` +
+          `(${formatRupiah(Number(display.amount))} + fee ${formatRupiah(Number(display.fee ?? 0))})`,
+      );
+    }
+    if (display?.expiredAt) {
+      lines.push(`Berlaku sampai: ${display.expiredAt}`);
+    }
+    lines.push(`Scan QR / detail: ${detailUrl}`);
+    lines.push(`Status: menunggu pembayaran`);
+
+    console.error(
+      `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=ok`,
+    );
+    return asText(lines.join("\n"));
+  },
+);
+
+// ---------------------------------------------------------------------
+// Tool 10: Order get (status check)
+// ---------------------------------------------------------------------
+server.tool(
+  "umkm_order_get",
+  "Ambil detail + status 1 order. Pakai untuk jawab pertanyaan customer " +
+    "'order saya udah dibayar?' atau owner 'cek order ORD-XXX'. Bisa pakai " +
+    "order_id (UUID) atau order_code (string).",
+  {
+    order_id: z
+      .string()
+      .optional()
+      .describe("UUID order. Pilih untuk presisi."),
+    order_code: z
+      .string()
+      .optional()
+      .describe("Order code (mis. 'ORD-20260429-001'). Server resolve ke UUID."),
+  },
+  async (args) => {
+    const ctx = { tool: "umkm_order_get", rid: mkRid() };
+    const start = Date.now();
+    console.error(`[mcp] tool=${ctx.tool} rid=${ctx.rid} start`);
+
+    if (!args.order_id && !args.order_code) {
+      return asError("Wajib isi salah satu: order_id atau order_code.");
+    }
+
+    let orderId = args.order_id?.trim();
+    const orderCode = args.order_code?.trim();
+    if (!orderId && orderCode) {
+      const lookup = await callApi(
+        "GET",
+        `/api/orders?search=${encodeURIComponent(orderCode)}&limit=5`,
+        null,
+        ctx,
+      );
+      if (!lookup.ok) {
+        return asError(`Gagal cari order: ${lookup.error?.message ?? ""}`);
+      }
+      const matches = (lookup.data?.orders ?? []).filter(
+        (o) => o.order_code === orderCode,
+      );
+      if (matches.length === 0) {
+        return asError(`Order ${orderCode} tidak ditemukan.`);
+      }
+      orderId = matches[0].id;
+    }
+
+    const result = await callApi("GET", `/api/orders/${orderId}`, null, ctx);
+    if (!result.ok) {
+      const code = result.error?.code ?? "unknown";
+      console.error(
+        `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=error code=${code}`,
+      );
+      return asError(`${code}: ${result.error?.message ?? ""}`);
+    }
+
+    const order = result.data?.order;
+    const items = result.data?.items ?? [];
+    const detailUrl = `${DASHBOARD_URL}/orders/${orderId}`;
+
+    const lines = [];
+    lines.push(`Order ${order?.order_code} (${order?.customer_name})`);
+    lines.push(`Status: ${order?.order_status}`);
+    lines.push(`Pembayaran: ${order?.payment_status}`);
+    lines.push(`Total: ${formatRupiah(Number(order?.order_total_amount))}`);
+    if (items.length > 0) {
+      lines.push(`Items:`);
+      for (const it of items) {
+        lines.push(
+          `  ${it.qty}× ${it.product_name} — ${formatRupiah(Number(it.subtotal))}`,
+        );
+      }
+    }
+    if (order?.fulfillment_method) {
+      lines.push(`Fulfillment: ${order.fulfillment_method}`);
+    }
+    if (order?.notes) lines.push(`Notes: ${order.notes}`);
+    lines.push(`Detail: ${detailUrl}`);
+
+    console.error(
+      `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=ok`,
+    );
+    return asText(lines.join("\n"));
   },
 );
 

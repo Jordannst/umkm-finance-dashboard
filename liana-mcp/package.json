@@ -1,7 +1,7 @@
 {
   "name": "umkm-finance-mcp",
   "version": "1.0.0",
-  "description": "MCP server untuk integrasi OpenClaw (Liana) dengan Dashboard Keuangan UMKM. Memberi 5 tools: catat pemasukan/pengeluaran, catat piutang, catat pembayaran, ambil rekap, healthcheck.",
+  "description": "MCP server untuk integrasi OpenClaw (Liana) dengan Dashboard Keuangan UMKM. 10 tools: finance (catat pemasukan/pengeluaran, piutang, rekap, healthcheck, notify) + order chat (catalog_search, create_order, generate_qris, order_get).",
   "type": "module",
   "main": "server.mjs",
   "bin": {

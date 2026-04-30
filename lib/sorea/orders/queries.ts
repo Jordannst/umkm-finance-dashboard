@@ -1,5 +1,7 @@
 import "server-only";
 
+import type { SupabaseClient } from "@supabase/supabase-js";
+
 import { createClient } from "@/lib/supabase/server";
 import type {
   Order,
@@ -31,8 +33,9 @@ export interface OrderListFilters {
 export async function listOrders(
   businessId: string,
   filters: OrderListFilters = {},
+  client?: SupabaseClient,
 ): Promise<Order[]> {
-  const supabase = await createClient();
+  const supabase = client ?? (await createClient());
   let query = supabase
     .from("orders")
     .select("*")
@@ -78,8 +81,9 @@ export async function listOrders(
 export async function getOrderWithItems(
   businessId: string,
   id: string,
+  client?: SupabaseClient,
 ): Promise<OrderWithItems | null> {
-  const supabase = await createClient();
+  const supabase = client ?? (await createClient());
 
   // Two queries in parallel untuk hemat RTT.
   const [orderRes, itemsRes] = await Promise.all([
@@ -132,8 +136,9 @@ export async function getOrderWithItems(
 export async function countOrdersForToday(
   businessId: string,
   todayPrefix: string, // mis. "ORD-20260429-"
+  client?: SupabaseClient,
 ): Promise<number> {
-  const supabase = await createClient();
+  const supabase = client ?? (await createClient());
   const { count, error } = await supabase
     .from("orders")
     .select("id", { count: "exact", head: true })

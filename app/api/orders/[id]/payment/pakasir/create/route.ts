@@ -1,5 +1,5 @@
 import { apiError, apiOk } from "@/lib/api/responses";
-import { getCurrentBusinessId } from "@/lib/finance/business";
+import { resolveBusinessAuth } from "@/lib/api/dual-auth";
 import { generateQrisForOrder } from "@/lib/sorea/payments/actions";
 
 export const dynamic = "force-dynamic";
@@ -16,30 +16,31 @@ interface RouteContext {
  * - order_id = order.order_code (untuk audit Pakasir)
  * - callback_url = /api/payments/pakasir-callback
  *
+ * Auth: dual mode (Phase 4) — session atau Bearer LIANA_SHARED_SECRET.
+ *
  * Response: { ok: true, data: { display: QrisDisplayPayload } }
  *   400 invalid_id
+ *   401 unauthorized
  *   404 order_not_found
  *   409 order_already_paid
  *   410 order_cancelled
  *   412 no_business
  *   500 config_error / pakasir_error / qr_render_error / db_error
  */
-export async function POST(_request: Request, context: RouteContext) {
+export async function POST(request: Request, context: RouteContext) {
   const { id } = await context.params;
   if (!id) {
     return apiError("invalid_id", "ID order tidak valid.", 400);
   }
 
-  const businessId = await getCurrentBusinessId();
-  if (!businessId) {
-    return apiError(
-      "no_business",
-      "Akun belum terhubung ke bisnis manapun.",
-      412,
-    );
-  }
+  const auth = await resolveBusinessAuth(request);
+  if (!auth.ok) return auth.response;
 
-  const result = await generateQrisForOrder({ businessId, orderId: id });
+  const result = await generateQrisForOrder({
+    businessId: auth.businessId,
+    orderId: id,
+    client: auth.supabase,
+  });
 
   if (!result.ok) {
     const status =

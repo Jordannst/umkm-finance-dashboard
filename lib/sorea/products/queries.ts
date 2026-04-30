@@ -1,5 +1,7 @@
 import "server-only";
 
+import type { SupabaseClient } from "@supabase/supabase-js";
+
 import { createClient } from "@/lib/supabase/server";
 import type { Product, ProductStockStatus } from "@/types/sorea";
 
@@ -22,8 +24,9 @@ export interface ProductFilters {
 export async function listProducts(
   businessId: string,
   filters: ProductFilters = {},
+  client?: SupabaseClient,
 ): Promise<Product[]> {
-  const supabase = await createClient();
+  const supabase = client ?? (await createClient());
   let query = supabase
     .from("products")
     .select("*")
@@ -62,8 +65,9 @@ export async function listProducts(
 export async function getProductById(
   businessId: string,
   id: string,
+  client?: SupabaseClient,
 ): Promise<Product | null> {
-  const supabase = await createClient();
+  const supabase = client ?? (await createClient());
   const { data, error } = await supabase
     .from("products")
     .select("*")
@@ -87,8 +91,9 @@ export async function getProductById(
 export async function getProductBySku(
   businessId: string,
   sku: string,
+  client?: SupabaseClient,
 ): Promise<Product | null> {
-  const supabase = await createClient();
+  const supabase = client ?? (await createClient());
   const { data, error } = await supabase
     .from("products")
     .select("*")
