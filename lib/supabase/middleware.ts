@@ -45,14 +45,20 @@ export async function updateSession(request: NextRequest) {
 
   const isAuthRoute = pathname === "/login" || pathname === "/signup";
   const isApiAuthRoute = pathname.startsWith("/auth/");
-  const isLianaApi = pathname.startsWith("/api/liana/");
+  // Semua /api/* di-bypass dari redirect login. Route handler API
+  // bertanggung jawab sendiri untuk auth, bisa pilih:
+  //   - session cookie (via getCurrentBusinessId / createClient)
+  //   - bearer token (via verifyLianaAuth / resolveBusinessAuth Phase 4)
+  //   - signature webhook (mis. /api/payments/pakasir-callback)
+  // Kalau redirect, request programmatic / MCP / webhook akan dapat
+  // 307 ke /login (HTML) dan break — itu yang Liana keluhkan di Phase 4A.
+  const isApi = pathname.startsWith("/api/");
   const isPublicAsset =
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
     pathname === "/";
 
-  // Endpoint Liana pakai shared secret server-side, bukan session user.
-  if (isLianaApi || isApiAuthRoute || isPublicAsset) {
+  if (isApi || isApiAuthRoute || isPublicAsset) {
     return supabaseResponse;
   }
 
