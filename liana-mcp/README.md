@@ -26,13 +26,71 @@ Memberikan **10 tools** ke agent Liana:
 
 ### Contoh flow `/pesan`
 
+#### Case A — `/pesan` saja (no args / no detail)
+
+```
+User Telegram:
+  /pesan
+
+Liana:
+  1. umkm_catalog_search()   ← TANPA query → list semua katalog ready
+
+  Output (sudah dikelompokkan per kategori + ada format hint):
+  📋 Katalog SOREA (12 produk ready):
+
+  Coffee
+  • P001 — Kopi Susu Aren — Rp18.000
+  • P002 — Americano — Rp15.000
+  …
+
+  Matcha
+  • P004 — SOREA Matcha Cream — Rp22.000
+  …
+
+  Snack
+  • P010 — French Fries — Rp16.000
+  …
+
+  Format order:
+    /pesan <nama> <qty> <produk>, <qty> <produk>, <metode>, <catatan opsional>
+
+  Contoh:
+    /pesan Patricia 1 matcha cream, 2 french fries, ambil di tempat, less sugar
+    /pesan Budi 1 kopi susu, antar, alamat Jl Mawar 12
+
+Liana cuma forward output ini (atau kutip ulang) ke Telegram. JANGAN
+buat order — user belum kasih detail.
+```
+
+#### Case B — `/pesan <keyword>` (ambigu, belum cukup buat order)
+
+```
+User Telegram:
+  /pesan matcha
+
+Liana:
+  1. umkm_catalog_search(query="matcha")
+     → P004 SOREA Matcha Cream Rp22.000
+
+  Liana balas:
+  Cocok 1 produk:
+  Matcha
+  • P004 — SOREA Matcha Cream — Rp22.000
+
+  Mau pesan berapa cup? Kirim format:
+    /pesan <nama> <qty> P004, <metode>
+  Contoh: /pesan Andi 2 matcha cream, ambil di tempat
+```
+
+#### Case C — `/pesan` lengkap (full order)
+
 ```
 User Telegram:
   /pesan Patricia 1 Matcha Cream, 2 French Fries, ambil di tempat, less sugar
 
 Liana:
-  1. umkm_catalog_search query="matcha cream"  → SKU=P004, Rp22.000
-  2. umkm_catalog_search query="french fries"  → SKU=P010, Rp16.000
+  1. umkm_catalog_search(query="matcha cream")  → SKU=P004, Rp22.000
+  2. umkm_catalog_search(query="french fries")  → SKU=P010, Rp16.000
   3. umkm_create_order(customer_name="Patricia",
        fulfillment_method="Ambil di tempat",
        items=[{sku:"P004",qty:1},{sku:"P010",qty:2}],
@@ -56,10 +114,15 @@ Liana balas chat (kirim foto + caption):
   [QR image attached → scan dari e-wallet / m-banking apa pun]
 ```
 
-> **Penting**: `umkm_generate_qris` return MCP `image` content (PNG base64).
-> Liana harus extract `data` dari image content dan kirim ke Telegram via
-> `sendPhoto` (bukan link admin). Admin detail URL hanya untuk owner login
-> di dashboard, bukan untuk customer scan.
+> **Penting**:
+> - Selalu pakai `umkm_catalog_search` untuk dapat katalog. **JANGAN** pakai
+>   `products.jsonl` lokal — itu bisa stale. Tool ini sync real-time dengan
+>   dashboard.
+> - `umkm_generate_qris` return MCP `image` content (PNG base64). Liana
+>   harus extract `data` dan kirim ke Telegram via `sendPhoto` (bukan link
+>   admin). Admin detail URL hanya untuk owner login di dashboard, bukan
+>   untuk customer scan.
+> - Telegram-friendly: bullet (`•`), bukan markdown table.
 
 ## Persyaratan
 

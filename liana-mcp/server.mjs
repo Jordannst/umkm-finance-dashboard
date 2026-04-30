@@ -691,17 +691,24 @@ server.tool(
 // ---------------------------------------------------------------------
 server.tool(
   "umkm_catalog_search",
-  "Cari produk dari katalog dashboard. WAJIB dipanggil sebelum umkm_create_order " +
-    "kalau user sebut produk dengan nama natural (mis. 'matcha cream', 'fries'), " +
-    "supaya dapat SKU yang valid. Default hanya tampilkan produk aktif & ready " +
-    "stok (only_ready=true). Set query='' untuk list semua aktif (max 200).",
+  "Cari produk dari katalog dashboard yang ter-sync real-time. WAJIB " +
+    "dipanggil sebelum umkm_create_order kalau user sebut produk dengan " +
+    "nama natural (mis. 'matcha cream', 'fries'), supaya dapat SKU yang " +
+    "valid. PANGGIL TANPA query (atau query='') untuk dapat list katalog " +
+    "lengkap — pakai ini saat user kirim '/pesan' tanpa detail order, atau " +
+    "saat customer tanya 'menu apa aja sih?'. Output dikelompokkan per " +
+    "kategori (bullet, bukan tabel — Telegram-friendly), plus contoh " +
+    "format order kalau query kosong. Default only_ready=true (hanya " +
+    "produk aktif & stok ready). JANGAN pakai produk dari file lokal — " +
+    "selalu pakai tool ini supaya sync dengan dashboard.",
   {
     query: z
       .string()
       .optional()
       .describe(
         "Substring case-insensitive yang dicocokkan dengan name ATAU SKU. " +
-          "Kosongkan untuk list semua. Contoh: 'matcha', 'P004'.",
+          "Kosongkan / tidak diisi = list semua katalog ready. " +
+          "Contoh: 'matcha', 'P004'.",
       ),
     category: z
       .string()
@@ -721,19 +728,22 @@ server.tool(
       .number()
       .int()
       .positive()
-      .max(50)
+      .max(100)
       .optional()
-      .default(20)
-      .describe("Maksimum hasil (default 20, hard cap 50)."),
+      .default(50)
+      .describe("Maksimum hasil (default 50, hard cap 100)."),
   },
   async (args) => {
     const ctx = { tool: "umkm_catalog_search", rid: mkRid() };
     const start = Date.now();
     console.error(`[mcp] tool=${ctx.tool} rid=${ctx.rid} start`);
 
+    const queryStr = args.query?.trim() ?? "";
+    const categoryStr = args.category?.trim() ?? "";
+
     const qs = new URLSearchParams();
-    if (args.query?.trim()) qs.set("search", args.query.trim());
-    if (args.category?.trim()) qs.set("category", args.category.trim());
+    if (queryStr) qs.set("search", queryStr);
+    if (categoryStr) qs.set("category", categoryStr);
     if (args.only_ready !== false) {
       qs.set("active", "true");
       qs.set("stock_status", "ready");
@@ -761,28 +771,83 @@ server.tool(
       console.error(
         `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=ok count=0`,
       );
+      if (queryStr || categoryStr) {
+        return asText(
+          `Tidak ada produk cocok dengan ${
+            queryStr ? `query "${queryStr}"` : ""
+          }${queryStr && categoryStr ? " + " : ""}${
+            categoryStr ? `kategori "${categoryStr}"` : ""
+          }. Coba kata kunci lain, atau panggil umkm_catalog_search ` +
+            `tanpa parameter untuk lihat seluruh katalog ready.`,
+        );
+      }
       return asText(
-        "Tidak ada produk yang cocok. " +
-          (args.only_ready
-            ? "Coba lepas only_ready (set false) untuk lihat produk yang habis/preorder."
-            : "Cek lagi query/kategori atau owner perlu tambah produk dulu di dashboard."),
+        "Belum ada produk ready di katalog. Owner perlu tambah produk dulu " +
+          "di dashboard (menu Produk).",
       );
     }
 
-    const lines = [`${products.length} produk ditemukan:`];
+    // Group by category — Telegram-friendly bullet output, NOT a table.
+    const byCategory = new Map();
     for (const p of products) {
-      const stock = p.stock_status ? ` [${p.stock_status}]` : "";
-      const cat = p.category ? ` · ${p.category}` : "";
-      const inactive = p.is_active === false ? " (NON-AKTIF)" : "";
+      const cat = (p.category || "Lain-lain").trim() || "Lain-lain";
+      if (!byCategory.has(cat)) byCategory.set(cat, []);
+      byCategory.get(cat).push(p);
+    }
+
+    const lines = [];
+    if (!queryStr && !categoryStr) {
+      lines.push(`📋 Katalog SOREA (${products.length} produk ready):`);
+    } else {
+      const parts = [];
+      if (queryStr) parts.push(`query "${queryStr}"`);
+      if (categoryStr) parts.push(`kategori "${categoryStr}"`);
+      lines.push(`${products.length} produk cocok ${parts.join(" + ")}:`);
+    }
+    lines.push("");
+
+    // Sort categories alphabetically for stable presentation order.
+    const sortedCats = Array.from(byCategory.keys()).sort((a, b) =>
+      a.localeCompare(b, "id"),
+    );
+    for (const cat of sortedCats) {
+      lines.push(`${cat}`);
+      for (const p of byCategory.get(cat)) {
+        const stockBadge =
+          p.stock_status && p.stock_status !== "ready"
+            ? ` [${p.stock_status}]`
+            : "";
+        const inactive = p.is_active === false ? " (NON-AKTIF)" : "";
+        lines.push(
+          `• ${p.sku} — ${p.name} — ${formatRupiah(Number(p.price))}${stockBadge}${inactive}`,
+        );
+      }
+      lines.push("");
+    }
+
+    // Append order format hint when listing full catalog (no filter) —
+    // makes Liana's job trivial when user typed `/pesan` with no details.
+    if (!queryStr && !categoryStr) {
+      lines.push("Format order:");
       lines.push(
-        `  ${p.sku} — ${p.name} — ${formatRupiah(Number(p.price))}${cat}${stock}${inactive}`,
+        "  /pesan <nama> <qty> <produk>, <qty> <produk>, <metode>, <catatan opsional>",
+      );
+      lines.push("");
+      lines.push("Contoh:");
+      lines.push(
+        "  /pesan Patricia 1 matcha cream, 2 french fries, ambil di tempat, less sugar",
+      );
+      lines.push(
+        "  /pesan Budi 1 kopi susu, antar, alamat Jl Mawar 12",
       );
     }
 
     console.error(
-      `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=ok count=${products.length}`,
+      `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} ` +
+        `result=ok count=${products.length} categories=${sortedCats.length} ` +
+        `mode=${queryStr || categoryStr ? "search" : "list_all"}`,
     );
-    return asText(lines.join("\n"));
+    return asText(lines.join("\n").trimEnd());
   },
 );
 
