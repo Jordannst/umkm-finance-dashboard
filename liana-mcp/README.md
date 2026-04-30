@@ -85,7 +85,7 @@ Liana:
 #### Case C — `/pesan` lengkap (full order)
 
 ```
-User Telegram:
+User Telegram (chat_id=987654321):
   /pesan Patricia 1 Matcha Cream, 2 French Fries, ambil di tempat, less sugar
 
 Liana:
@@ -94,7 +94,8 @@ Liana:
   3. umkm_create_order(customer_name="Patricia",
        fulfillment_method="Ambil di tempat",
        items=[{sku:"P004",qty:1},{sku:"P010",qty:2}],
-       notes="less sugar")
+       notes="less sugar",
+       telegram_chat_id="987654321")    ← WAJIB: chat_id user dari context
      → ORD-20260429-002, total Rp54.000
   4. umkm_generate_qris(order_id="...")
      → text: Rp600 demo, total payable Rp1.603 (incl fee), expired_at
@@ -112,7 +113,33 @@ Liana balas chat (kirim foto + caption):
   Berlaku sampai: 2026-04-29T15:00:00Z
   Status: menunggu pembayaran
   [QR image attached → scan dari e-wallet / m-banking apa pun]
+
+[Customer scan QR, bayar via GoPay/OVO/dst]
+
+[5-10 detik kemudian, dashboard otomatis kirim ke chat customer:]
+
+  ✅ Pembayaran Diterima
+
+  Order: ORD-20260429-002
+  Atas nama: Patricia
+
+  • 1× SOREA Matcha Cream — Rp22.000
+  • 2× French Fries — Rp32.000
+
+  Total: Rp54.000
+  Metode: Ambil di tempat
+  Catatan: less sugar
+
+  Pesanan kamu akan segera diproses oleh tim kami.
+  Terima kasih sudah belanja! 🙌
 ```
+
+> **Phase 4B (auto-paid notification)**: notifikasi "Pembayaran Diterima" di
+> atas dikirim **dashboard langsung** via Bot API `sendMessage` saat Pakasir
+> webhook fire — bukan via Liana. Liana cukup pastikan `telegram_chat_id`
+> di-pass saat `umkm_create_order`. Dashboard simpan kontak di
+> `customer_contact_channel='telegram'` + `customer_contact_id=<chat_id>`,
+> lalu webhook handler kirim message saat status berubah jadi `paid`.
 
 > **Penting**:
 > - Selalu pakai `umkm_catalog_search` untuk dapat katalog. **JANGAN** pakai

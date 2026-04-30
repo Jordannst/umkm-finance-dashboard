@@ -862,6 +862,9 @@ server.tool(
     "(1) resolve harga dari katalog (TIDAK terima harga dari client), " +
     "(2) reject produk inactive/habis, (3) generate order_code unik. " +
     "Order baru otomatis status='menunggu_pembayaran' & source='chat'. " +
+    "PENTING (Phase 4B): WAJIB isi telegram_chat_id dengan chat_id user " +
+    "Telegram dari context — itu kunci supaya dashboard bisa auto-kirim " +
+    "konfirmasi 'sudah dibayar' ke customer saat Pakasir webhook fire. " +
     "Setelah order dibuat, lanjutkan dengan umkm_generate_qris.",
   {
     customer_name: z
@@ -908,20 +911,42 @@ server.tool(
       .describe(
         "Catatan dari customer (mis. 'less sugar', 'pedas level 2'). Boleh kosong.",
       ),
+    telegram_chat_id: z
+      .string()
+      .min(1)
+      .max(120)
+      .optional()
+      .describe(
+        "Phase 4B: chat_id Telegram customer — ambil dari context chat aktif " +
+          "(positif untuk private chat, negatif diawali '-100' untuk group). " +
+          "Disimpan di order supaya dashboard auto-kirim notifikasi " +
+          "'Pembayaran diterima ✅' ke chat customer saat Pakasir webhook " +
+          "konfirmasi pembayaran sukses. JANGAN kosongkan kalau order " +
+          "datang dari Telegram chat — tanpa ini, customer harus tanya " +
+          "manual 'udah lunas belum?'.",
+      ),
   },
   async (args) => {
     const ctx = { tool: "umkm_create_order", rid: mkRid() };
     const start = Date.now();
     console.error(
-      `[mcp] tool=${ctx.tool} rid=${ctx.rid} start customer=${args.customer_name} items=${args.items.length}`,
+      `[mcp] tool=${ctx.tool} rid=${ctx.rid} start customer=${args.customer_name} items=${args.items.length} has_chat_id=${!!args.telegram_chat_id}`,
     );
 
+    const tgChatId = args.telegram_chat_id?.trim();
     const body = {
       customer_name: args.customer_name,
       fulfillment_method: args.fulfillment_method,
       address: args.address ?? null,
       notes: args.notes ?? null,
       items: args.items,
+      // Phase 4B: kalau Liana pass chat_id, kita simpan untuk auto-notify.
+      ...(tgChatId
+        ? {
+            customer_contact_channel: "telegram",
+            customer_contact_id: tgChatId,
+          }
+        : {}),
       // server-side default: created_from_source='chat', created_by='Liana'
       // (di-set otomatis di /api/orders bearer mode).
     };

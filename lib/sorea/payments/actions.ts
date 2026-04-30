@@ -10,8 +10,10 @@ import {
   type CreatePakasirParams,
 } from "@/lib/sorea/payments/pakasir";
 import { createClient } from "@/lib/supabase/server";
+import { notifyOrderPaid } from "@/lib/telegram/notify-order-paid";
 import type {
   Order,
+  OrderItem,
   PakasirWebhookPayload,
   QrisDisplayPayload,
 } from "@/types/sorea";
@@ -384,7 +386,52 @@ export async function processPakasirCallback(
   console.info(
     `[processPakasirCallback] order ${order.order_code} marked paid via Pakasir; completed_at=${completedAt}`,
   );
+
+  // Phase 4B: auto-notify customer di Telegram kalau order punya kontak.
+  // Best-effort — webhook tetap return ok ke Pakasir meskipun notify gagal,
+  // supaya Pakasir tidak retry karena masalah Telegram-side.
+  await sendPaidNotificationBestEffort(adminSupabase, order, "webhook");
+
   return { ok: true, updated: true, orderId: order.id };
+}
+
+/**
+ * Helper: fetch items + kirim notify ke customer (Telegram). Tidak throw —
+ * gagal di-log saja. Dipakai oleh webhook dan simulate handler.
+ */
+async function sendPaidNotificationBestEffort(
+  adminSupabase: SupabaseClient,
+  order: Order,
+  source: "webhook" | "simulate",
+): Promise<void> {
+  // Skip kalau tidak ada channel kontak — hindari query items yang sia-sia.
+  if (!order.customer_contact_channel || !order.customer_contact_id) {
+    return;
+  }
+
+  try {
+    const { data: itemRows } = await adminSupabase
+      .from("order_items")
+      .select("qty, product_name, subtotal")
+      .eq("order_id", order.id);
+
+    const result = await notifyOrderPaid({
+      order,
+      items: (itemRows as Pick<OrderItem, "qty" | "product_name" | "subtotal">[]) ??
+        [],
+    });
+    if (!result.ok) {
+      console.warn(
+        `[notifyOrderPaid:${source}] gagal kirim ke ${order.customer_contact_id}: ` +
+          `${result.errorMessage ?? result.skipped ?? "unknown"}`,
+      );
+    }
+  } catch (err) {
+    console.error(
+      `[notifyOrderPaid:${source}] unexpected error:`,
+      err instanceof Error ? err.message : err,
+    );
+  }
 }
 
 // =====================================================================
@@ -462,6 +509,11 @@ export async function simulatePakasirSuccess(params: {
   console.info(
     `[simulatePakasirSuccess] order ${order.order_code} marked paid (SIMULATE).`,
   );
+
+  // Phase 4B: trigger same notification path as real webhook supaya
+  // simulate juga ke-test ujung-ujungnya (Telegram message sampai).
+  await sendPaidNotificationBestEffort(supabase, order, "simulate");
+
   return { ok: true, updated: true, orderId: order.id };
 }
 

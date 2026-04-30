@@ -74,7 +74,37 @@ export const createOrderInputSchema = z.object({
     .nullish()
     .transform((v) => (v && v.length > 0 ? v : null)),
   created_from_source: orderSourceSchema.optional().default("dashboard"),
-});
+
+  // Phase 4B: kontak customer untuk auto-notify saat payment paid.
+  // Diisi oleh MCP saat order dibuat dari chat Telegram. DB constraint
+  // mengharuskan dua-duanya non-null atau dua-duanya null.
+  customer_contact_channel: z
+    .enum(["telegram", "whatsapp"])
+    .nullish()
+    .transform((v) => v ?? null),
+  customer_contact_id: z
+    .string()
+    .trim()
+    .max(120, {
+      message: "customer_contact_id maksimal 120 karakter.",
+    })
+    .nullish()
+    .transform((v) => (v && v.length > 0 ? v : null)),
+})
+  .refine(
+    (data) => {
+      // Pair check: kalau salah satu di-set, dua-duanya wajib di-set.
+      const hasChannel = data.customer_contact_channel != null;
+      const hasId = data.customer_contact_id != null;
+      return hasChannel === hasId;
+    },
+    {
+      message:
+        "customer_contact_channel dan customer_contact_id wajib diisi " +
+        "berpasangan (atau dua-duanya kosong).",
+      path: ["customer_contact_id"],
+    },
+  );
 
 export type CreateOrderInput = z.infer<typeof createOrderInputSchema>;
 
@@ -234,6 +264,8 @@ export async function createOrderForBusiness(params: {
     orderTotalAmount: orderTotal,
     createdBy: input.created_by,
     createdFromSource: input.created_from_source,
+    customerContactChannel: input.customer_contact_channel,
+    customerContactId: input.customer_contact_id,
   });
 
   if (!created.ok) {
@@ -311,6 +343,8 @@ async function insertOrderWithRetry(
     orderTotalAmount: number;
     createdBy: string | null;
     createdFromSource: OrderSource;
+    customerContactChannel: "telegram" | "whatsapp" | null;
+    customerContactId: string | null;
   },
 ): Promise<
   | { ok: true; order: Order }
@@ -334,9 +368,11 @@ async function insertOrderWithRetry(
         address: payload.address,
         notes: payload.notes,
         order_total_amount: payload.orderTotalAmount,
-        // payment_amount default 1 di DB; biar Phase 3 yang ubah.
+        // payment_amount default 600 di DB (Phase 3 demo).
         created_by: payload.createdBy,
         created_from_source: payload.createdFromSource,
+        customer_contact_channel: payload.customerContactChannel,
+        customer_contact_id: payload.customerContactId,
       })
       .select("*")
       .single();

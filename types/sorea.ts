@@ -82,6 +82,18 @@ export interface Order {
   payment_reference: string | null;
   created_from_source: OrderSource;
   created_by: string | null;
+  /**
+   * Phase 4B: channel kontak customer untuk auto-notify saat payment paid.
+   * Null untuk order dari web/POS yang belum punya channel.
+   */
+  customer_contact_channel: "telegram" | "whatsapp" | null;
+  /**
+   * Phase 4B: identifier customer di channel:
+   * - telegram → chat_id ("123456789" atau "-100..." untuk group)
+   * - whatsapp → MSISDN E.164
+   * Wajib non-null kalau customer_contact_channel non-null (DB constraint).
+   */
+  customer_contact_id: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
