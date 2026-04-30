@@ -39,18 +39,27 @@ Liana:
        notes="less sugar")
      → ORD-20260429-002, total Rp54.000
   4. umkm_generate_qris(order_id="...")
-     → Rp600 demo, total payable Rp1.603 (incl fee)
+     → text: Rp600 demo, total payable Rp1.603 (incl fee), expired_at
+     → image content (PNG base64) ← attach langsung ke Telegram pakai sendPhoto
+     → payment_number (EMVCo string) sebagai fallback / alt renderer
+     → admin_detail_url (admin only — JANGAN kirim ke customer)
 
-Liana balas chat:
+Liana balas chat (kirim foto + caption):
   Pesanan dibuat ✅
   Order: ORD-20260429-002
   • 1× SOREA Matcha Cream — Rp22.000
   • 2× French Fries — Rp32.000
   Total normal: Rp54.000
   QRIS demo Pakasir: Rp600 (total payable Rp1.603)
-  Scan QR / detail: https://your-app.vercel.app/orders/<uuid>
+  Berlaku sampai: 2026-04-29T15:00:00Z
   Status: menunggu pembayaran
+  [QR image attached → scan dari e-wallet / m-banking apa pun]
 ```
+
+> **Penting**: `umkm_generate_qris` return MCP `image` content (PNG base64).
+> Liana harus extract `data` dari image content dan kirim ke Telegram via
+> `sendPhoto` (bukan link admin). Admin detail URL hanya untuk owner login
+> di dashboard, bukan untuk customer scan.
 
 ## Persyaratan
 

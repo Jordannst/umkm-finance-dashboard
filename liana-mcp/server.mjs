@@ -930,11 +930,13 @@ server.tool(
   "umkm_generate_qris",
   "Generate QRIS demo Pakasir untuk order yang sudah ada. WAJIB dipanggil " +
     "setelah umkm_create_order. Bisa pakai order_id (UUID) ATAU order_code " +
-    "(mis. 'ORD-20260429-001'). Server akan return: payment_amount (nominal " +
-    "demo, default Rp600), total_payment (amount + fee Pakasir), expires_at, " +
-    "dan link detail order. JANGAN kirim QR EMV string mentah ke chat — " +
-    "panjang & confusing. Gunakan link detail biar customer scan QR di " +
-    "halaman dashboard.",
+    "(mis. 'ORD-20260429-001'). Server akan return: gambar QR sebagai MCP " +
+    "image content (PNG base64) yang BISA langsung di-attach ke chat " +
+    "Telegram pakai sendPhoto, plus payment_number (EMVCo string) sebagai " +
+    "fallback / alt renderer, plus metadata (amount Rp600 demo, total " +
+    "payable, fee, expired_at). PENTING: JANGAN kirim admin_detail_url ke " +
+    "customer — itu halaman admin internal yang butuh login. Kirim QR " +
+    "image langsung di chat sebagai foto.",
   {
     order_id: z
       .string()
@@ -1008,7 +1010,7 @@ server.tool(
       );
       if (code === "order_already_paid") {
         return asError(
-          `Order ini sudah lunas, tidak perlu QRIS lagi. Detail: ${DASHBOARD_URL}/orders/${orderId}`,
+          `Order ini sudah lunas, tidak perlu QRIS lagi.`,
         );
       }
       if (code === "order_cancelled") {
@@ -1026,28 +1028,82 @@ server.tool(
       return asError(`${code}: ${msg}`);
     }
 
-    const display = result.data?.display;
-    const detailUrl = `${DASHBOARD_URL}/orders/${orderId}`;
-    const lines = [];
-    lines.push(`QRIS demo siap ✅`);
-    if (orderCode) lines.push(`Order: ${orderCode}`);
-    lines.push(`Nominal: ${formatRupiah(Number(display?.amount ?? 0))}`);
-    if (display?.totalPayment != null && display.totalPayment > display.amount) {
-      lines.push(
+    const display = result.data?.display ?? {};
+    const adminDetailUrl = `${DASHBOARD_URL}/orders/${orderId}`;
+
+    // 1) Header text untuk customer (kirim isi ini di Telegram).
+    const customerLines = [];
+    customerLines.push(`QRIS demo Pakasir siap ✅`);
+    if (orderCode) customerLines.push(`Order: ${orderCode}`);
+    customerLines.push(
+      `Nominal QRIS demo: ${formatRupiah(Number(display.amount ?? 0))}`,
+    );
+    if (
+      display.totalPayment != null &&
+      Number(display.totalPayment) > Number(display.amount ?? 0)
+    ) {
+      customerLines.push(
         `Total payable Pakasir: ${formatRupiah(Number(display.totalPayment))} ` +
           `(${formatRupiah(Number(display.amount))} + fee ${formatRupiah(Number(display.fee ?? 0))})`,
       );
     }
-    if (display?.expiredAt) {
-      lines.push(`Berlaku sampai: ${display.expiredAt}`);
+    if (display.expiredAt) {
+      customerLines.push(`Berlaku sampai: ${display.expiredAt}`);
     }
-    lines.push(`Scan QR / detail: ${detailUrl}`);
-    lines.push(`Status: menunggu pembayaran`);
+    customerLines.push(`Status: menunggu pembayaran`);
+    customerLines.push(
+      `Instruksi: QRIS siap dikirim sebagai gambar di chat. Scan dari ` +
+        `aplikasi e-wallet / m-banking apapun.`,
+    );
+
+    const content = [{ type: "text", text: customerLines.join("\n") }];
+
+    // 2) Image content kalau qrDataUrl tersedia. Strip prefix data URL
+    //    supaya jadi pure base64 (sesuai MCP ImageContent spec).
+    const dataUrl =
+      typeof display.qrDataUrl === "string" ? display.qrDataUrl : "";
+    const dataUrlMatch = dataUrl.match(/^data:image\/(png|jpeg);base64,(.+)$/);
+    let hasImage = false;
+    if (dataUrlMatch) {
+      hasImage = true;
+      const mimeType = `image/${dataUrlMatch[1]}`;
+      const b64 = dataUrlMatch[2];
+      content.push({ type: "image", data: b64, mimeType });
+    }
+
+    // 3) Fallback / alt renderer info: payment_number (EMV) selalu
+    //    disertakan kalau ada, supaya client yang gak bisa render image
+    //    content masih bisa generate QR sendiri atau kirim sebagai text.
+    const metaLines = [];
+    if (!hasImage) {
+      if (display.emv) {
+        metaLines.push(
+          `⚠️ Gambar QR tidak ter-render di server. Render QR sendiri dari ` +
+            `payment_number di bawah, atau hubungi owner.`,
+        );
+      } else {
+        metaLines.push(
+          `⚠️ QR data tidak tersedia (Pakasir tidak return EMV maupun data ` +
+            `URL). Hubungi owner untuk cek konfigurasi Pakasir.`,
+        );
+      }
+    }
+    if (display.emv) {
+      metaLines.push(`payment_number (EMVCo): ${display.emv}`);
+    }
+    if (display.pakasirReference) {
+      metaLines.push(`pakasir_reference: ${display.pakasirReference}`);
+    }
+    metaLines.push(
+      `admin_detail_url: ${adminDetailUrl} (admin only — JANGAN kirim ke customer, butuh login)`,
+    );
+    content.push({ type: "text", text: metaLines.join("\n") });
 
     console.error(
-      `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} result=ok`,
+      `[mcp] tool=${ctx.tool} rid=${ctx.rid} total_ms=${Date.now() - start} ` +
+        `result=ok has_image=${hasImage} emv_len=${display.emv?.length ?? 0}`,
     );
-    return asText(lines.join("\n"));
+    return { content };
   },
 );
 
